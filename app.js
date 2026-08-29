@@ -18,7 +18,10 @@ function urlConfigured(){
 
 /* ---------------- app state ---------------- */
 const CLASSES = ['大一','大二','大三','大四'];
-const SECTIONS = ['甲','乙','丙','丁','戊'];
+const SECTIONS = ['甲','乙','丙','丁','戊','己'];
+
+const ILLNESS_REASONS = ['發燒','昏眩','噁心嘔吐','頭痛','牙痛','胃痛','腹痛','腹瀉','經痛','氣喘','流鼻血','疹癢','眼疾','過敏','其它'];
+const INJURY_REASONS = ['擦傷','裂割刺傷','夾壓傷','挫撞傷','扭傷','灼燙傷','叮咬傷','骨折','舊傷','肌肉拉傷','甲溝炎','起水泡','其它'];
 
 let state = {
   screen: 'home',
@@ -28,7 +31,7 @@ let state = {
   records: [],
   loggedIn: false,
   toast: null,
-  student: { grade:null, section:null, id:null, name:null, gender:null, reason:null },
+  student: { grade:null, section:null, id:null, name:null, gender:null, reason:null, detail:null },
   loginErr: '',
   loginBusy: false,
   search: '',
@@ -76,8 +79,8 @@ const ICONS = {
   cross: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg>`,
   student: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/></svg>`,
   nurse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M9 4h6"/><path d="M6 8h12v6a6 6 0 0 1-12 0V8Z"/><path d="M12 12v4M10 14h4"/></svg>`,
-  bandage: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="6" rx="3" transform="rotate(-35 12 12)"/><circle cx="8.3" cy="10.7" r="1.1"/><circle cx="15.7" cy="13.3" r="1.1"/></svg>`,
-  thermo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2 2 0 0 0-4 0v11.26a4 4 0 1 0 4 0Z"/></svg>`,
+  bandage: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 12l10 10L22 12 12 2Z"/><path d="M9 9l6 6M9 15l6-6"/></svg>`,
+  thermo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
   upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`,
   logout: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>`,
@@ -86,11 +89,16 @@ const ICONS = {
   refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v6h-6"/></svg>`,
 };
 
-function stepperSvg(step){
-  const cx = [40, 200, 360, 520];
-  const w = 560;
+function stepperSvg(step, total){
+  total = total || 4;
+  const w = 140 * total;
+  const margin = 40;
+  const gap = (w - margin*2) / (total-1);
+  const cx = [];
+  for(let i=0;i<total;i++) cx.push(margin + i*gap);
+
   let path = `M0 26 L20 26 L28 10 L36 42 L44 26 L${cx[0]-6} 26`;
-  for(let i=0;i<3;i++){
+  for(let i=0;i<total-1;i++){
     path += ` L${cx[i]+6} 26 L${cx[i]+ (cx[i+1]-cx[i])/2 - 8} 26 L${cx[i]+(cx[i+1]-cx[i])/2} 8 L${cx[i]+(cx[i+1]-cx[i])/2+8} 44 L${cx[i]+(cx[i+1]-cx[i])/2+16} 26 L${cx[i+1]-6} 26`;
   }
   path += ` L${w} 26`;
@@ -175,6 +183,7 @@ function screenHtml(){
     case 'student-2': return studentStep2();
     case 'student-3': return studentStep3();
     case 'student-4': return studentStep4();
+    case 'student-5': return studentStep5();
     case 'student-done': return studentDone();
     case 'nurse-login': return nurseLogin();
     case 'nurse-dashboard': return nurseDashboard();
@@ -216,7 +225,7 @@ function studentStep1(){
     </div>
     ${grade ? `
       <p class="subtitle" style="margin-bottom:10px;">班別</p>
-      <div class="choice-grid cols-5">
+      <div class="choice-grid cols-6">
         ${SECTIONS.map(s=>`<div class="choice-btn ${section===s?'selected':''}" data-act="pick-section" data-val="${s}">${s}</div>`).join('')}
       </div>
     ` : ''}
@@ -265,8 +274,8 @@ function studentStep3(){
     <h1 class="title">選擇性別</h1>
     <p class="subtitle">${state.student.name}（${state.student.id}）</p>
     <div class="choice-grid">
-      <div class="choice-btn ${g==='男'?'selected':''}" data-act="pick-gender" data-val="男">男</div>
-      <div class="choice-btn ${g==='女'?'selected':''}" data-act="pick-gender" data-val="女">女</div>
+      <div class="choice-btn ${g==='生理男'?'selected':''}" data-act="pick-gender" data-val="生理男">生理男</div>
+      <div class="choice-btn ${g==='生理女'?'selected':''}" data-act="pick-gender" data-val="生理女">生理女</div>
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" data-act="back-step2">上一步</button>
@@ -275,10 +284,9 @@ function studentStep3(){
   </div>`;
 }
 
-/* ---- STUDENT STEP 4: 原因 + 送出 ---- */
+/* ---- STUDENT STEP 4: 傷病原因分類 ---- */
 function studentStep4(){
   const r = state.student.reason;
-  const s = state.student;
   return `
   ${stepperBlock(4)}
   <div class="card">
@@ -294,14 +302,35 @@ function studentStep4(){
         <h3>受傷</h3>
       </div>
     </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" data-act="back-step3">上一步</button>
+      <button class="btn btn-primary" data-act="to-step5" ${r?'':'disabled'}>下一步</button>
+    </div>
+  </div>`;
+}
+
+/* ---- STUDENT STEP 5: 詳細原因 + 送出 ---- */
+function studentStep5(){
+  const s = state.student;
+  const options = s.reason === '身體不適' ? ILLNESS_REASONS : INJURY_REASONS;
+  const d = s.detail;
+  return `
+  ${stepperBlock(5)}
+  <div class="card">
+    <h1 class="title">${s.reason}詳細原因</h1>
+    <p class="subtitle">請選擇最符合的項目</p>
+    <div class="choice-grid cols-3">
+      ${options.map(o=>`<div class="choice-btn ${d===o?'selected':''}" data-act="pick-detail" data-val="${o}">${o}</div>`).join('')}
+    </div>
     <div class="summary-box" style="margin-top:22px;">
       <div class="summary-row"><span class="k">班級</span><span class="v">${s.grade}${s.section}班</span></div>
       <div class="summary-row"><span class="k">學號 / 姓名</span><span class="v">${s.id} ${s.name}</span></div>
       <div class="summary-row"><span class="k">性別</span><span class="v">${s.gender}</span></div>
+      <div class="summary-row"><span class="k">原因</span><span class="v">${s.reason}${d ? '・'+d : ''}</span></div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-ghost" data-act="back-step3">上一步</button>
-      <button class="btn btn-primary" id="submit-btn" data-act="submit-record" ${r?'':'disabled'}>送出</button>
+      <button class="btn btn-ghost" data-act="back-step4">上一步</button>
+      <button class="btn btn-primary" id="submit-btn" data-act="submit-record" ${d?'':'disabled'}>提交</button>
     </div>
   </div>`;
 }
@@ -319,10 +348,10 @@ function studentDone(){
 }
 
 function stepperBlock(step){
-  const labels = ['班級','學號姓名','性別','傷病原因'];
+  const labels = ['班級','學號姓名','性別','原因','詳細原因'];
   return `
   <div class="stepper">
-    ${stepperSvg(step)}
+    ${stepperSvg(step, labels.length)}
     <div class="step-label-row">
       ${labels.map((l,i)=>`<div class="step-label ${i+1===step?'active':''}">${l}</div>`).join('')}
     </div>
@@ -396,7 +425,7 @@ function nurseDashboard(){
                   <span class="rc-sid">${r.id}</span>
                   <span class="rc-class">${r.class}・${r.gender}</span>
                 </div>
-                <div class="rc-meta">${r.reason} ・ ${formatTime(r.ts)} ${r.status==='done' ? '・ 已處理' : ''}</div>
+                <div class="rc-meta">${r.reason}${r.detail ? '・'+r.detail : ''} ・ ${formatTime(r.ts)} ${r.status==='done' ? '・ 已處理' : ''}</div>
               </div>
               <div class="rc-actions">
                 <div class="icon-btn" data-act="toggle-status" data-id="${r.recordId}" title="標記已處理">${ICONS.done}</div>
@@ -455,7 +484,7 @@ async function onAct(e){
   switch(act){
     case 'go-home':
       state.screen = 'home';
-      state.student = { grade:null, section:null, id:null, name:null, gender:null, reason:null };
+      state.student = { grade:null, section:null, id:null, name:null, gender:null, reason:null, detail:null };
       state.search = '';
       render(); break;
 
@@ -491,7 +520,16 @@ async function onAct(e){
       state.screen = 'student-3'; render(); break;
 
     case 'pick-reason':
-      state.student.reason = el.dataset.val; render(); break;
+      state.student.reason = el.dataset.val;
+      state.student.detail = null;
+      render(); break;
+    case 'to-step5':
+      state.screen = 'student-5'; render(); break;
+    case 'back-step4':
+      state.screen = 'student-4'; render(); break;
+
+    case 'pick-detail':
+      state.student.detail = el.dataset.val; render(); break;
     case 'submit-record':
       await submitRecord(); break;
 
@@ -524,12 +562,12 @@ async function onAct(e){
 
 async function submitRecord(){
   const btn = document.getElementById('submit-btn');
-  if(btn){ btn.disabled = true; btn.textContent = '送出中…'; }
+  if(btn){ btn.disabled = true; btn.textContent = '提交中…'; }
   const s = state.student;
   const rec = {
     recordId: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     class: s.grade + s.section + '班',
-    id: s.id, name: s.name, gender: s.gender, reason: s.reason,
+    id: s.id, name: s.name, gender: s.gender, reason: s.reason, detail: s.detail,
     status: 'pending', ts: Date.now()
   };
   try{
@@ -540,12 +578,12 @@ async function submitRecord(){
       render();
     } else {
       showToast('送出失敗，請稍後再試一次');
-      if(btn){ btn.disabled = false; btn.textContent = '送出'; }
+      if(btn){ btn.disabled = false; btn.textContent = '提交'; }
     }
   }catch(err){
     console.error(err);
     showToast('無法連線，請確認網路連線後再試一次');
-    if(btn){ btn.disabled = false; btn.textContent = '送出'; }
+    if(btn){ btn.disabled = false; btn.textContent = '提交'; }
   }
 }
 
