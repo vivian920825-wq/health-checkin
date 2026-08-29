@@ -51,12 +51,9 @@ let state = {
   treatmentSelected: [],
   treatmentOther: '',
   treatmentBusy: false,
-  showChart: false,
   rosterFull: [],
   caseSearch: '',
 };
-
-let chartInstance = null;
 
 let refreshTimer = null;
 
@@ -156,6 +153,7 @@ const ICONS = {
   refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v6h-6"/></svg>`,
   clipboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M9 11h6M9 15h6"/></svg>`,
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>`,
+  print: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="6" y="13" width="12" height="8"/><path d="M4 9h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2M6 17H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h2"/></svg>`,
 };
 
 function stepperSvg(step, total){
@@ -229,7 +227,6 @@ function render(){
     ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
   `;
   bindEvents();
-  if(state.screen === 'nurse-dashboard' && state.showChart) renderChart();
 }
 
 function headerRight(){
@@ -244,7 +241,6 @@ function headerRight(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="pill-btn" data-act="go-case-management">學生個案管理</button>
         <button class="pill-btn" data-act="go-change-password">修改密碼</button>
-        <button class="pill-btn" data-act="refresh-dashboard">${ICONS.refresh} 重新整理</button>
         <button class="pill-btn" data-act="logout">${ICONS.logout} 登出</button>
       </div>`;
   }
@@ -517,7 +513,7 @@ function nurseRecordTreatment(){
 function nurseCaseManagement(){
   const q = (state.caseSearch||'').trim();
   let list = [...state.rosterFull];
-  if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q));
+  if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q) || (r.history||'').includes(q));
 
   return `
   <div class="card" style="margin-bottom:18px;">
@@ -533,17 +529,20 @@ function nurseCaseManagement(){
 
   <div class="card">
     <h1 class="title">學生個案搜尋</h1>
-    <p class="subtitle" style="margin-bottom:14px;">搜尋學生可看到名冊資料與病史；學生報到時，系統也會自動把病史帶進當次報到紀錄。</p>
-    <input class="search-input" id="case-search" placeholder="搜尋姓名、學號或班級" value="${q}">
+    <p class="subtitle" style="margin-bottom:14px;">可用姓名、學號、班級，或直接搜病史內容（例如「氣喘」）找出相關學生。</p>
+    <input class="search-input" id="case-search" placeholder="搜尋姓名、學號、班級或病史" value="${q}">
     ${
       list.length === 0
       ? `<div class="empty-note">${state.rosterFull.length===0 ? '尚未匯入學生名冊' : '找不到符合的學生'}</div>`
       : `<div class="student-list" style="max-height:none;">
           ${list.map(r=>`
             <div class="student-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:4px;">
-              <div style="display:flex;justify-content:space-between;width:100%;">
-                <span class="sname">${r.name}</span>
-                <span class="sid">${r.id}・${r.class}</span>
+              <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
+                <div>
+                  <span class="sname">${r.name}</span>
+                  <span class="sid" style="margin-left:8px;">${r.id}・${r.class}</span>
+                </div>
+                <div class="icon-btn" data-act="print-student" data-id="${r.id}" title="列印學生卡">${ICONS.print}</div>
               </div>
               ${r.history ? `<div style="font-size:13px;color:var(--injury);">病史：${r.history}</div>` : `<div style="font-size:13px;color:var(--muted);">尚無病史紀錄</div>`}
             </div>`).join('')}
@@ -590,26 +589,6 @@ function nurseDashboard(){
     <div class="stat-card"><div class="num" style="color:var(--injury)">${injuryCount}</div><div class="lbl">受傷</div></div>
   </div>
 
-  <div class="card" style="margin-bottom:18px;">
-    <h1 class="title" style="font-size:18px;">每日報到趨勢</h1>
-    ${
-      state.showChart
-      ? `
-        <div style="position:relative;height:220px;">
-          <canvas id="trend-chart"></canvas>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-ghost" data-act="toggle-chart">隱藏圖表</button>
-          <button class="btn btn-primary" data-act="download-chart">${ICONS.download} 下載圖表</button>
-        </div>
-      `
-      : `
-        <p class="subtitle" style="margin-bottom:14px;">選好日期區間後，點下方按鈕產生圖表。</p>
-        <button class="btn btn-primary" data-act="toggle-chart" style="width:100%;">產生圖表</button>
-      `
-    }
-  </div>
-
   <div class="card">
     <h1 class="title" style="font-size:18px;">報到紀錄（區間內）</h1>
     <div class="dash-toolbar">
@@ -651,79 +630,6 @@ function filterByDateRange(records, from, to){
   return records.filter(r => r.ts >= fromTs && r.ts <= toTs);
 }
 
-function downloadChart(){
-  if(!chartInstance){
-    showToast('請先產生圖表');
-    return;
-  }
-  const url = chartInstance.toBase64Image('image/png', 1);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `每日報到趨勢_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.png`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
-function renderChart(){
-  const canvas = document.getElementById('trend-chart');
-  if(!canvas || typeof Chart === 'undefined') return;
-
-  const rangeRecords = filterByDateRange(state.records, state.dashFrom, state.dashTo);
-
-  // build ordered list of day labels between from/to (fallback: use records' own date span)
-  let fromDate = state.dashFrom ? new Date(state.dashFrom + 'T00:00:00') : null;
-  let toDate = state.dashTo ? new Date(state.dashTo + 'T00:00:00') : null;
-  if(!fromDate || !toDate){
-    if(rangeRecords.length === 0){
-      fromDate = new Date(); toDate = new Date();
-    } else {
-      const tsList = rangeRecords.map(r=>r.ts);
-      fromDate = new Date(Math.min(...tsList));
-      toDate = new Date(Math.max(...tsList));
-    }
-  }
-  const days = [];
-  const cursor = new Date(fromDate);
-  while(cursor <= toDate && days.length < 366){
-    days.push(cursor.toISOString().slice(0,10));
-    cursor.setDate(cursor.getDate()+1);
-  }
-
-  const illnessByDay = {}, injuryByDay = {};
-  days.forEach(d=>{ illnessByDay[d]=0; injuryByDay[d]=0; });
-  rangeRecords.forEach(r=>{
-    const d = new Date(r.ts).toISOString().slice(0,10);
-    if(!(d in illnessByDay)) return;
-    if(r.reason === '身體不適') illnessByDay[d]++; else injuryByDay[d]++;
-  });
-
-  const labels = days.map(d => d.slice(5)); // MM-DD
-  const illnessData = days.map(d => illnessByDay[d]);
-  const injuryData = days.map(d => injuryByDay[d]);
-
-  if(chartInstance){ chartInstance.destroy(); chartInstance = null; }
-  chartInstance = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label:'身體不適', data: illnessData, backgroundColor: '#3D7FBF', borderRadius: 4 },
-        { label:'受傷', data: injuryData, backgroundColor: '#C1533F', borderRadius: 4 },
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { stacked: true, grid:{ display:false } },
-        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
-      },
-      plugins: { legend: { position: 'bottom' } }
-    }
-  });
-}
-
 function formatTime(ts){
   const d = new Date(ts);
   const pad = n => String(n).padStart(2,'0');
@@ -745,11 +651,11 @@ function bindEvents(){
   }
   const dashFrom = document.getElementById('dash-from');
   if(dashFrom){
-    dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; hideChart(); render(); });
+    dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; render(); });
   }
   const dashTo = document.getElementById('dash-to');
   if(dashTo){
-    dashTo.addEventListener('change', e=>{ state.dashTo = e.target.value; hideChart(); render(); });
+    dashTo.addEventListener('change', e=>{ state.dashTo = e.target.value; render(); });
   }
   const treatmentOther = document.getElementById('treatment-other');
   if(treatmentOther){
@@ -769,11 +675,6 @@ function bindEvents(){
 function preserveFocus(id){
   const el = document.getElementById(id);
   if(el){ el.focus(); const v = el.value; el.value=''; el.value=v; }
-}
-
-function hideChart(){
-  state.showChart = false;
-  if(chartInstance){ chartInstance.destroy(); chartInstance = null; }
 }
 
 function manageAutoRefresh(){
@@ -847,11 +748,6 @@ async function onAct(e){
       await doLogin(); break;
     case 'logout':
       state.loggedIn = false; state.sessionToken = null; state.records = []; state.screen = 'home'; render(); break;
-    case 'refresh-dashboard':
-      state.loading = true; render();
-      await loadRecords(); state.loading = false; render();
-      showToast('已重新整理');
-      break;
 
     case 'go-change-password':
       state.pwdErr = ''; state.screen = 'nurse-change-password'; render(); break;
@@ -867,22 +763,16 @@ async function onAct(e){
       state.screen = 'nurse-case-management';
       render();
       break;
+    case 'print-student':
+      printStudentCard(el.dataset.id); break;
 
     case 'range-preset':
       state.dashFrom = todayStr(-Number(el.dataset.days));
       state.dashTo = todayStr(0);
-      hideChart();
       render(); break;
     case 'range-all':
       state.dashFrom = ''; state.dashTo = '';
-      hideChart();
       render(); break;
-
-    case 'toggle-chart':
-      if(state.showChart){ hideChart(); } else { state.showChart = true; }
-      render(); break;
-    case 'download-chart':
-      downloadChart(); break;
 
     case 'toggle-status':
       await toggleStatus(el.dataset.id); break;
@@ -1074,6 +964,48 @@ async function saveTreatment(){
     showToast('無法連線，請稍後再試一次');
     render();
   }
+}
+
+/* ---------------- 列印學生卡 ---------------- */
+function printStudentCard(studentId){
+  const r = state.rosterFull.find(s => s.id === studentId);
+  if(!r){
+    showToast('找不到這位學生的資料');
+    return;
+  }
+  const win = window.open('', '_blank', 'width=480,height=640');
+  if(!win){
+    showToast('瀏覽器擋住了列印視窗，請允許彈出視窗後再試一次');
+    return;
+  }
+  const html = `<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><title>學生卡 - ${r.name}</title>
+<style>
+  body{font-family:'Noto Sans TC',sans-serif;padding:32px;color:#1C2B2A;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{color:#5C7370;font-size:13px;margin-bottom:24px;}
+  .row{display:flex;padding:10px 0;border-bottom:1px solid #DCE8E6;}
+  .row .k{width:80px;color:#5C7370;font-size:14px;}
+  .row .v{flex:1;font-size:15px;font-weight:600;}
+  .history{margin-top:20px;padding:14px 16px;background:#FBECE9;color:#C1533F;border-radius:8px;font-size:14px;line-height:1.6;}
+  .history .k{font-weight:700;display:block;margin-bottom:4px;}
+</style></head>
+<body>
+  <h1>學生基本資料卡</h1>
+  <div class="sub">健康中心報到系統</div>
+  <div class="row"><div class="k">姓名</div><div class="v">${r.name}</div></div>
+  <div class="row"><div class="k">學號</div><div class="v">${r.id}</div></div>
+  <div class="row"><div class="k">班級</div><div class="v">${r.class}</div></div>
+  <div class="history">
+    <span class="k">病史</span>
+    ${r.history ? r.history : '（無病史紀錄）'}
+  </div>
+</body></html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); }, 300);
 }
 
 /* ---------------- 匯出 Excel ---------------- */
