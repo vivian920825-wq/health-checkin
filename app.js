@@ -48,6 +48,7 @@ let state = {
   treatmentSelected: [],
   treatmentOther: '',
   treatmentBusy: false,
+  showChart: false,
 };
 
 let chartInstance = null;
@@ -203,7 +204,7 @@ function render(){
     ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
   `;
   bindEvents();
-  if(state.screen === 'nurse-dashboard') renderChart();
+  if(state.screen === 'nurse-dashboard' && state.showChart) renderChart();
 }
 
 function headerRight(){
@@ -523,9 +524,22 @@ function nurseDashboard(){
 
   <div class="card" style="margin-bottom:18px;">
     <h1 class="title" style="font-size:18px;">每日報到趨勢</h1>
-    <div style="position:relative;height:220px;">
-      <canvas id="trend-chart"></canvas>
-    </div>
+    ${
+      state.showChart
+      ? `
+        <div style="position:relative;height:220px;">
+          <canvas id="trend-chart"></canvas>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" data-act="toggle-chart">隱藏圖表</button>
+          <button class="btn btn-primary" data-act="download-chart">${ICONS.download} 下載圖表</button>
+        </div>
+      `
+      : `
+        <p class="subtitle" style="margin-bottom:14px;">選好日期區間後，點下方按鈕產生圖表。</p>
+        <button class="btn btn-primary" data-act="toggle-chart" style="width:100%;">產生圖表</button>
+      `
+    }
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -577,6 +591,20 @@ function filterByDateRange(records, from, to){
   const fromTs = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
   const toTs = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
   return records.filter(r => r.ts >= fromTs && r.ts <= toTs);
+}
+
+function downloadChart(){
+  if(!chartInstance){
+    showToast('請先產生圖表');
+    return;
+  }
+  const url = chartInstance.toBase64Image('image/png', 1);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `每日報到趨勢_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function renderChart(){
@@ -659,11 +687,11 @@ function bindEvents(){
   }
   const dashFrom = document.getElementById('dash-from');
   if(dashFrom){
-    dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; render(); });
+    dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; hideChart(); render(); });
   }
   const dashTo = document.getElementById('dash-to');
   if(dashTo){
-    dashTo.addEventListener('change', e=>{ state.dashTo = e.target.value; render(); });
+    dashTo.addEventListener('change', e=>{ state.dashTo = e.target.value; hideChart(); render(); });
   }
   const treatmentOther = document.getElementById('treatment-other');
   if(treatmentOther){
@@ -679,6 +707,11 @@ function bindEvents(){
 function preserveFocus(id){
   const el = document.getElementById(id);
   if(el){ el.focus(); const v = el.value; el.value=''; el.value=v; }
+}
+
+function hideChart(){
+  state.showChart = false;
+  if(chartInstance){ chartInstance.destroy(); chartInstance = null; }
 }
 
 function manageAutoRefresh(){
@@ -768,10 +801,18 @@ async function onAct(e){
     case 'range-preset':
       state.dashFrom = todayStr(-Number(el.dataset.days));
       state.dashTo = todayStr(0);
+      hideChart();
       render(); break;
     case 'range-all':
       state.dashFrom = ''; state.dashTo = '';
+      hideChart();
       render(); break;
+
+    case 'toggle-chart':
+      if(state.showChart){ hideChart(); } else { state.showChart = true; }
+      render(); break;
+    case 'download-chart':
+      downloadChart(); break;
 
     case 'toggle-status':
       await toggleStatus(el.dataset.id); break;
@@ -976,20 +1017,29 @@ function exportRecordsToExcel(){
     return;
   }
 
-  const rows = list.map(r => ({
-    '時間': formatTime(r.ts),
-    '班級': r.class,
-    '學號': r.id,
-    '姓名': r.name,
-    '性別': r.gender,
-    '原因': r.reason,
-    '詳細原因': r.detail || '',
-    '護理處置': r.treatment || '',
-    '狀態': r.status === 'done' ? '已處理' : '未處理',
-  }));
+  const rows = list.map(r => {
+    const parsed = parseTreatmentString(r.treatment);
+    const row = {
+      '時間': formatTime(r.ts),
+      '班級': r.class,
+      '學號': r.id,
+      '姓名': r.name,
+      '性別': r.gender,
+      '原因': r.reason,
+      '詳細原因': r.detail || '',
+      '狀態': r.status === 'done' ? '已處理' : '未處理',
+    };
+    TREATMENT_OPTIONS.forEach(opt => {
+      row[opt] = parsed.options.includes(opt) ? 1 : '';
+    });
+    row['其它內容'] = parsed.other || '';
+    return row;
+  });
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:10},{wch:14},{wch:40},{wch:8}];
+  const baseWidths = [14,10,10,10,8,10,14,8];
+  const colWidths = [...baseWidths, ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
+  ws['!cols'] = colWidths.map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '報到紀錄');
   const fname = `報到紀錄_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.xlsx`;
