@@ -28,6 +28,11 @@ const TREATMENT_OPTIONS = ['傷口護理','冰敷','熱敷','休息觀察','告�
 // 匯出 Excel 用：身體不適 + 受傷的詳細原因合併去重（保留原順序，「其它」只出現一次）
 const REASON_DETAIL_OPTIONS = Array.from(new Set([...ILLNESS_REASONS, ...INJURY_REASONS]));
 
+const HEALTH_CHECK_ITEMS = [
+  '血壓 mmHg', '血糖(AC)', 'T-CHOL mg/dl', 'SGOT IU/L', 'SGPT IU/L',
+  '尿酸 mg/dl', '高密度脂蛋白膽固醇_HDL', '胸部X光', '心電圖'
+];
+
 let state = {
   screen: 'home',
   loading: true,
@@ -53,6 +58,12 @@ let state = {
   treatmentBusy: false,
   rosterFull: [],
   caseSearch: '',
+  healthCheckStudentId: null,
+  healthCheckStudent: null,
+  healthCheckItems: {},
+  healthCheckNote: '',
+  healthCheckBusy: false,
+  healthCheckLoading: false,
 };
 
 let refreshTimer = null;
@@ -135,6 +146,26 @@ async function loadRosterFull(){
   }catch(e){
     console.error(e);
     state.loadError = '無法連線到資料庫，請檢查網路連線';
+  }
+}
+
+async function loadHealthCheck(studentId){
+  try{
+    const data = await apiGet('getHealthCheck', { token: state.sessionToken, studentId: studentId });
+    if(data && data.ok){
+      state.healthCheckItems = data.items || {};
+      state.healthCheckNote = data.note || '';
+    } else if(data && data.error === 'unauthorized'){
+      state.loggedIn = false;
+      state.sessionToken = null;
+      state.screen = 'nurse-login';
+      state.loginErr = '登入已逾時，請重新登入';
+    } else {
+      showToast('讀取健檢資料失敗');
+    }
+  }catch(e){
+    console.error(e);
+    showToast('無法連線，請稍後再試');
   }
 }
 
@@ -235,6 +266,7 @@ function headerRight(){
   if(state.screen === 'nurse-change-password') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
   if(state.screen === 'nurse-record-treatment') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
   if(state.screen === 'nurse-case-management') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
+  if(state.screen === 'nurse-health-check') return `<button class="pill-btn" data-act="back-case-management">回學生個案管理</button>`;
   if(state.screen === 'nurse-dashboard'){
     return `
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -260,6 +292,7 @@ function screenHtml(){
     case 'nurse-dashboard': return nurseDashboard();
     case 'nurse-record-treatment': return nurseRecordTreatment();
     case 'nurse-case-management': return nurseCaseManagement();
+    case 'nurse-health-check': return nurseHealthCheck();
     default: return homeScreen();
   }
 }
@@ -546,13 +579,52 @@ function nurseCaseManagement(){
           ${list.map(r=>`
             <div class="student-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:4px;">
               <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
-                <span class="sname">${r.name}</span>
-                <span class="sid">${r.id}・${r.class}</span>
+                <div>
+                  <span class="sname">${r.name}</span>
+                  <span class="sid" style="margin-left:8px;">${r.id}・${r.class}</span>
+                </div>
+                <button class="pill-btn" data-act="go-health-check" data-id="${r.id}">修改資料</button>
               </div>
               ${r.history ? `<div style="font-size:13px;color:var(--injury);">病史：${r.history}</div>` : `<div style="font-size:13px;color:var(--muted);">尚無病史紀錄</div>`}
+              ${r.healthAbnormal && r.healthAbnormal.length ? `<div style="font-size:13px;color:var(--warn);font-weight:700;">⚠ 健檢異常：${r.healthAbnormal.join('、')}</div>` : ''}
             </div>`).join('')}
         </div>`
     }
+  </div>`;
+}
+
+/* ---- NURSE HEALTH CHECK (學生健檢異常資料) ---- */
+function nurseHealthCheck(){
+  if(state.healthCheckLoading){
+    return `<div class="loading-wrap">讀取資料中…</div>`;
+  }
+  const s = state.healthCheckStudent;
+  if(!s){
+    return `<div class="card"><div class="empty-note">找不到這位學生的資料。</div>
+      <div class="btn-row"><button class="btn btn-primary" data-act="back-case-management" style="width:100%;">回學生個案管理</button></div></div>`;
+  }
+  return `
+  <div class="card">
+    <h1 class="title">健檢異常資料</h1>
+    <p class="subtitle">${s.name}（${s.id}）・ ${s.class}</p>
+    <p class="subtitle" style="margin-bottom:14px;">每個項目皆為選填，填入數值後可勾選是否異常。</p>
+    ${HEALTH_CHECK_ITEMS.map(item=>{
+      const entry = state.healthCheckItems[item] || {value:'', abnormal:false};
+      return `
+      <div class="field-group" style="display:flex;align-items:center;gap:10px;">
+        <label style="flex:1;min-width:150px;margin-bottom:0;">${item}</label>
+        <input type="text" class="hc-value" data-item="${item}" value="${entry.value}" placeholder="數值（選填）" style="flex:1.4;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-soft);">
+        <div class="choice-btn hc-abnormal" data-act="toggle-hc-abnormal" data-item="${item}" style="flex:none;padding:10px 14px;font-size:13px;${entry.abnormal ? 'background:var(--injury);color:#fff;' : ''}">異常</div>
+      </div>`;
+    }).join('')}
+    <div class="field-group" style="margin-top:18px;">
+      <label>備註</label>
+      <textarea id="hc-note" rows="3" style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface-soft);font-family:var(--font-body);font-size:15px;">${state.healthCheckNote}</textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" data-act="back-case-management">取消</button>
+      <button class="btn btn-primary" data-act="save-health-check" ${state.healthCheckBusy?'disabled':''}>${state.healthCheckBusy ? '儲存中…' : '儲存'}</button>
+    </div>
   </div>`;
 }
 
@@ -670,6 +742,17 @@ function bindEvents(){
   if(caseSearch){
     caseSearch.addEventListener('input', e=>{ state.caseSearch = e.target.value; render(); preserveFocus('case-search'); });
   }
+  document.querySelectorAll('.hc-value').forEach(el=>{
+    el.addEventListener('input', e=>{
+      const item = el.dataset.item;
+      if(!state.healthCheckItems[item]) state.healthCheckItems[item] = {value:'', abnormal:false};
+      state.healthCheckItems[item].value = e.target.value;
+    });
+  });
+  const hcNote = document.getElementById('hc-note');
+  if(hcNote){
+    hcNote.addEventListener('input', e=>{ state.healthCheckNote = e.target.value; });
+  }
   const rosterFile = document.getElementById('roster-file');
   if(rosterFile){
     rosterFile.addEventListener('change', handleRosterFile);
@@ -770,6 +853,32 @@ async function onAct(e){
       break;
     case 'export-roster-excel':
       exportRosterToExcel(); break;
+
+    case 'go-health-check': {
+      const studentId = el.dataset.id;
+      state.healthCheckStudentId = studentId;
+      state.healthCheckStudent = state.rosterFull.find(r => r.id === studentId) || null;
+      state.healthCheckItems = {};
+      state.healthCheckNote = '';
+      state.healthCheckLoading = true;
+      state.screen = 'nurse-health-check';
+      render();
+      await loadHealthCheck(studentId);
+      state.healthCheckLoading = false;
+      render();
+      break;
+    }
+    case 'back-case-management':
+      state.screen = 'nurse-case-management'; render(); break;
+    case 'toggle-hc-abnormal': {
+      const item = el.dataset.item;
+      if(!state.healthCheckItems[item]) state.healthCheckItems[item] = {value:'', abnormal:false};
+      state.healthCheckItems[item].abnormal = !state.healthCheckItems[item].abnormal;
+      render();
+      break;
+    }
+    case 'save-health-check':
+      await saveHealthCheck(); break;
 
     case 'range-preset':
       state.dashFrom = todayStr(-Number(el.dataset.days));
@@ -966,6 +1075,35 @@ async function saveTreatment(){
   }catch(err){
     console.error(err);
     state.treatmentBusy = false;
+    showToast('無法連線，請稍後再試一次');
+    render();
+  }
+}
+
+async function saveHealthCheck(){
+  state.healthCheckBusy = true; render();
+  try{
+    const res = await apiPost('updateHealthCheck', {
+      token: state.sessionToken,
+      studentId: state.healthCheckStudentId,
+      items: state.healthCheckItems,
+      note: state.healthCheckNote
+    });
+    if(res && res.ok){
+      const abnormalList = HEALTH_CHECK_ITEMS.filter(item => state.healthCheckItems[item] && state.healthCheckItems[item].abnormal);
+      state.rosterFull = state.rosterFull.map(r => r.id === state.healthCheckStudentId ? {...r, healthAbnormal: abnormalList} : r);
+      state.healthCheckBusy = false;
+      state.screen = 'nurse-case-management';
+      render();
+      showToast('健檢資料已儲存');
+    } else {
+      state.healthCheckBusy = false;
+      showToast('儲存失敗，請稍後再試一次');
+      render();
+    }
+  }catch(err){
+    console.error(err);
+    state.healthCheckBusy = false;
     showToast('無法連線，請稍後再試一次');
     render();
   }
