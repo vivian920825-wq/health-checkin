@@ -52,6 +52,8 @@ let state = {
   treatmentOther: '',
   treatmentBusy: false,
   showChart: false,
+  rosterFull: [],
+  caseSearch: '',
 };
 
 let chartInstance = null;
@@ -112,6 +114,26 @@ async function loadRecords(){
       state.loginErr = '登入已逾時，請重新登入';
     } else {
       state.loadError = '讀取報到紀錄失敗';
+    }
+  }catch(e){
+    console.error(e);
+    state.loadError = '無法連線到資料庫，請檢查網路連線';
+  }
+}
+
+async function loadRosterFull(){
+  try{
+    const data = await apiGet('getRosterFull', { token: state.sessionToken });
+    if(data && data.ok){
+      state.rosterFull = data.roster || [];
+      state.loadError = null;
+    } else if(data && data.error === 'unauthorized'){
+      state.loggedIn = false;
+      state.sessionToken = null;
+      state.screen = 'nurse-login';
+      state.loginErr = '登入已逾時，請重新登入';
+    } else {
+      state.loadError = '讀取學生個案資料失敗';
     }
   }catch(e){
     console.error(e);
@@ -216,9 +238,11 @@ function headerRight(){
   if(state.screen === 'nurse-login') return `<button class="pill-btn" data-act="go-home">回首頁</button>`;
   if(state.screen === 'nurse-change-password') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
   if(state.screen === 'nurse-record-treatment') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
+  if(state.screen === 'nurse-case-management') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
   if(state.screen === 'nurse-dashboard'){
     return `
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="pill-btn" data-act="go-case-management">學生個案管理</button>
         <button class="pill-btn" data-act="go-change-password">修改密碼</button>
         <button class="pill-btn" data-act="refresh-dashboard">${ICONS.refresh} 重新整理</button>
         <button class="pill-btn" data-act="logout">${ICONS.logout} 登出</button>
@@ -240,6 +264,7 @@ function screenHtml(){
     case 'nurse-change-password': return nurseChangePassword();
     case 'nurse-dashboard': return nurseDashboard();
     case 'nurse-record-treatment': return nurseRecordTreatment();
+    case 'nurse-case-management': return nurseCaseManagement();
     default: return homeScreen();
   }
 }
@@ -471,6 +496,7 @@ function nurseRecordTreatment(){
   <div class="card">
     <h1 class="title">護理處置</h1>
     <p class="subtitle">${rec.name}（${rec.id}）・ ${rec.class} ・ ${rec.reason}${rec.detail ? '・'+rec.detail : ''}</p>
+    ${rec.history ? `<div class="setup-warning" style="background:var(--injury-bg);color:var(--injury);">病史：${rec.history}</div>` : ''}
     <div class="choice-grid">
       ${TREATMENT_OPTIONS.map(o=>`<div class="choice-btn ${sel.includes(o)?'selected':''}" data-act="toggle-treatment" data-val="${o}">${o}</div>`).join('')}
     </div>
@@ -484,6 +510,45 @@ function nurseRecordTreatment(){
       <button class="btn btn-ghost" data-act="back-dashboard">取消</button>
       <button class="btn btn-primary" data-act="save-treatment" ${state.treatmentBusy?'disabled':''}>${state.treatmentBusy ? '儲存中…' : '儲存'}</button>
     </div>
+  </div>`;
+}
+
+/* ---- NURSE CASE MANAGEMENT (學生個案管理：名冊 + 病史) ---- */
+function nurseCaseManagement(){
+  const q = (state.caseSearch||'').trim();
+  let list = [...state.rosterFull];
+  if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q));
+
+  return `
+  <div class="card" style="margin-bottom:18px;">
+    <h1 class="title">學生名冊管理</h1>
+    <p class="subtitle" style="margin-bottom:14px;">目前名冊共 ${state.rosterFull.length} 筆。匯入 Excel 需包含欄位：<b>學號</b>、<b>姓名</b>、<b>班級</b>（例如：大一甲班），可選填 <b>病史</b>。</p>
+    <div class="dash-toolbar">
+      <button class="btn btn-primary import-btn">${ICONS.upload} 匯入 Excel 名冊
+        <input type="file" id="roster-file" accept=".xlsx,.xls,.csv">
+      </button>
+      ${state.rosterFull.length ? `<button class="btn btn-ghost" data-act="clear-roster">清空名冊</button>` : ''}
+    </div>
+  </div>
+
+  <div class="card">
+    <h1 class="title">學生個案搜尋</h1>
+    <p class="subtitle" style="margin-bottom:14px;">搜尋學生可看到名冊資料與病史；學生報到時，系統也會自動把病史帶進當次報到紀錄。</p>
+    <input class="search-input" id="case-search" placeholder="搜尋姓名、學號或班級" value="${q}">
+    ${
+      list.length === 0
+      ? `<div class="empty-note">${state.rosterFull.length===0 ? '尚未匯入學生名冊' : '找不到符合的學生'}</div>`
+      : `<div class="student-list" style="max-height:none;">
+          ${list.map(r=>`
+            <div class="student-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:4px;">
+              <div style="display:flex;justify-content:space-between;width:100%;">
+                <span class="sname">${r.name}</span>
+                <span class="sid">${r.id}・${r.class}</span>
+              </div>
+              ${r.history ? `<div style="font-size:13px;color:var(--injury);">病史：${r.history}</div>` : `<div style="font-size:13px;color:var(--muted);">尚無病史紀錄</div>`}
+            </div>`).join('')}
+        </div>`
+    }
   </div>`;
 }
 
@@ -545,17 +610,6 @@ function nurseDashboard(){
     }
   </div>
 
-  <div class="card" style="margin-bottom:18px;">
-    <h1 class="title" style="font-size:18px;">學生名冊管理</h1>
-    <p class="subtitle" style="margin-bottom:14px;">目前名冊共 ${state.roster.length} 筆。匯入 Excel 需包含欄位：<b>學號</b>、<b>姓名</b>、<b>班級</b>（例如：大一甲班）。</p>
-    <div class="dash-toolbar">
-      <button class="btn btn-primary import-btn">${ICONS.upload} 匯入 Excel 名冊
-        <input type="file" id="roster-file" accept=".xlsx,.xls,.csv">
-      </button>
-      ${state.roster.length ? `<button class="btn btn-ghost" data-act="clear-roster">清空名冊</button>` : ''}
-    </div>
-  </div>
-
   <div class="card">
     <h1 class="title" style="font-size:18px;">報到紀錄（區間內）</h1>
     <div class="dash-toolbar">
@@ -576,6 +630,7 @@ function nurseDashboard(){
                   <span class="rc-class">${r.class}・${r.gender}</span>
                 </div>
                 <div class="rc-meta">${r.reason}${r.detail ? '・'+r.detail : ''} ・ ${formatTime(r.ts)} ${r.status==='done' ? '・ 已處理' : ''}</div>
+                ${r.history ? `<div class="rc-meta" style="color:var(--injury);">病史：${r.history}</div>` : ''}
                 ${r.treatment ? `<div class="rc-meta" style="color:var(--primary-dark);">處置：${r.treatment}</div>` : ''}
               </div>
               <div class="rc-actions">
@@ -700,6 +755,10 @@ function bindEvents(){
   if(treatmentOther){
     treatmentOther.addEventListener('input', e=>{ state.treatmentOther = e.target.value; });
   }
+  const caseSearch = document.getElementById('case-search');
+  if(caseSearch){
+    caseSearch.addEventListener('input', e=>{ state.caseSearch = e.target.value; render(); preserveFocus('case-search'); });
+  }
   const rosterFile = document.getElementById('roster-file');
   if(rosterFile){
     rosterFile.addEventListener('change', handleRosterFile);
@@ -801,6 +860,14 @@ async function onAct(e){
     case 'do-change-password':
       await doChangePassword(); break;
 
+    case 'go-case-management':
+      state.loading = true; render();
+      await loadRosterFull();
+      state.loading = false;
+      state.screen = 'nurse-case-management';
+      render();
+      break;
+
     case 'range-preset':
       state.dashFrom = todayStr(-Number(el.dataset.days));
       state.dashTo = todayStr(0);
@@ -850,6 +917,7 @@ async function onAct(e){
       if(confirm('確定要清空整份學生名冊嗎？此動作無法復原。')){
         await apiPost('clearRoster', { token: state.sessionToken });
         state.roster = [];
+        state.rosterFull = [];
         render();
         showToast('名冊已清空');
       }
@@ -1028,6 +1096,7 @@ function exportRecordsToExcel(){
       '學號': r.id,
       '姓名': r.name,
       '性別': r.gender,
+      '病史': r.history || '',
       '原因': r.reason,
       '狀態': r.status === 'done' ? '已處理' : '未處理',
     };
@@ -1042,7 +1111,7 @@ function exportRecordsToExcel(){
   });
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  const baseWidths = [14,10,10,10,8,10,8];
+  const baseWidths = [14,10,10,10,8,20,10,8];
   const colWidths = [...baseWidths, ...new Array(REASON_DETAIL_OPTIONS.length).fill(6), ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
   ws['!cols'] = colWidths.map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
@@ -1064,7 +1133,9 @@ async function handleRosterFile(e){
       const id = String(row['學號'] ?? row['id'] ?? '').trim();
       const name = String(row['姓名'] ?? row['name'] ?? '').trim();
       const cls = String(row['班級'] ?? row['class'] ?? '').trim();
-      return {id, name, class:cls};
+      const historyRaw = row['病史'] ?? row['history'];
+      const history = (historyRaw === undefined || historyRaw === null) ? undefined : String(historyRaw).trim();
+      return {id, name, class:cls, history};
     }).filter(r=>r.id && r.name && r.class);
 
     if(parsed.length === 0){
@@ -1075,6 +1146,7 @@ async function handleRosterFile(e){
     const res = await apiPost('importRoster', { token: state.sessionToken, rows: parsed });
     if(res && res.ok){
       await loadRoster();
+      await loadRosterFull();
       render();
       showToast(`已匯入 ${parsed.length} 筆學生資料`);
     } else {
