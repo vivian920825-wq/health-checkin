@@ -29,7 +29,7 @@ const TREATMENT_OPTIONS = ['傷口護理','冰敷','熱敷','休息觀察','告�
 const REASON_DETAIL_OPTIONS = Array.from(new Set([...ILLNESS_REASONS, ...INJURY_REASONS]));
 
 const HEALTH_CHECK_ITEMS = [
-  '血壓 mmHg', '血糖(AC)', 'T-CHOL mg/dl', 'SGOT IU/L', 'SGPT IU/L',
+  '血壓 mmHg', '血糖(AC)', 'T-CHOL mg/dl','T-G mg/dl', 'SGOT IU/L', 'SGPT IU/L',
   '尿酸 mg/dl', '高密度脂蛋白膽固醇_HDL', '胸部X光', '心電圖'
 ];
 
