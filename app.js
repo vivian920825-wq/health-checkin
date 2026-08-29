@@ -25,6 +25,9 @@ const INJURY_REASONS = ['擦傷','裂割刺傷','夾壓傷','挫撞傷','扭傷'
 
 const TREATMENT_OPTIONS = ['傷口護理','冰敷','熱敷','休息觀察','告知家長','通知導師','家長帶回','校方送醫','衛生教育','生理食鹽水沖洗','口罩給予','止血','擦藥','禁食','溫開水給予','補充糖水','補充水分','體溫監測','血氧監測','彈繃固定','氧氣給與','熱敷觀察','三角巾固定','頸圈固定','夾板固定','KED固定','長背板固定','保暖','CPR+AED','哈姆立克法','通知家長送醫','家長同意自行返家','家長同意自行就醫','家長未接聽到電話','電訪追蹤','救護車護送','教官或導師送醫','其它'];
 
+// 匯出 Excel 用：身體不適 + 受傷的詳細原因合併去重（保留原順序，「其它」只出現一次）
+const REASON_DETAIL_OPTIONS = Array.from(new Set([...ILLNESS_REASONS, ...INJURY_REASONS]));
+
 let state = {
   screen: 'home',
   loading: true,
@@ -1026,9 +1029,11 @@ function exportRecordsToExcel(){
       '姓名': r.name,
       '性別': r.gender,
       '原因': r.reason,
-      '詳細原因': r.detail || '',
       '狀態': r.status === 'done' ? '已處理' : '未處理',
     };
+    REASON_DETAIL_OPTIONS.forEach(opt => {
+      row[opt] = (r.detail === opt) ? 1 : '';
+    });
     TREATMENT_OPTIONS.forEach(opt => {
       row[opt] = parsed.options.includes(opt) ? 1 : '';
     });
@@ -1037,8 +1042,8 @@ function exportRecordsToExcel(){
   });
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  const baseWidths = [14,10,10,10,8,10,14,8];
-  const colWidths = [...baseWidths, ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
+  const baseWidths = [14,10,10,10,8,10,8];
+  const colWidths = [...baseWidths, ...new Array(REASON_DETAIL_OPTIONS.length).fill(6), ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
   ws['!cols'] = colWidths.map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '報到紀錄');
