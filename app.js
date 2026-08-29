@@ -153,7 +153,6 @@ const ICONS = {
   refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v6h-6"/></svg>`,
   clipboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M9 11h6M9 15h6"/></svg>`,
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>`,
-  print: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="6" y="13" width="12" height="8"/><path d="M4 9h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2M6 17H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h2"/></svg>`,
 };
 
 function stepperSvg(step, total){
@@ -510,10 +509,16 @@ function nurseRecordTreatment(){
 }
 
 /* ---- NURSE CASE MANAGEMENT (學生個案管理：名冊 + 病史) ---- */
-function nurseCaseManagement(){
+function filterRosterFull(){
   const q = (state.caseSearch||'').trim();
   let list = [...state.rosterFull];
   if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q) || (r.history||'').includes(q));
+  return list;
+}
+
+function nurseCaseManagement(){
+  const q = (state.caseSearch||'').trim();
+  const list = filterRosterFull();
 
   return `
   <div class="card" style="margin-bottom:18px;">
@@ -532,7 +537,7 @@ function nurseCaseManagement(){
     <p class="subtitle" style="margin-bottom:14px;">可用姓名、學號、班級，或直接搜病史內容（例如「氣喘」）找出相關學生。</p>
     <div class="dash-toolbar">
       <input class="search-input" id="case-search" placeholder="搜尋姓名、學號、班級或病史" value="${q}">
-      <button class="pill-btn" data-act="export-roster-excel">${ICONS.download} 匯出完整 Excel</button>
+      <button class="pill-btn" data-act="export-roster-excel">${ICONS.download} 匯出名單 Excel${q ? '（搜尋結果）' : ''}</button>
     </div>
     ${
       list.length === 0
@@ -541,11 +546,8 @@ function nurseCaseManagement(){
           ${list.map(r=>`
             <div class="student-row" style="cursor:default;align-items:flex-start;flex-direction:column;gap:4px;">
               <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
-                <div>
-                  <span class="sname">${r.name}</span>
-                  <span class="sid" style="margin-left:8px;">${r.id}・${r.class}</span>
-                </div>
-                <div class="icon-btn" data-act="print-student" data-id="${r.id}" title="列印學生卡">${ICONS.print}</div>
+                <span class="sname">${r.name}</span>
+                <span class="sid">${r.id}・${r.class}</span>
               </div>
               ${r.history ? `<div style="font-size:13px;color:var(--injury);">病史：${r.history}</div>` : `<div style="font-size:13px;color:var(--muted);">尚無病史紀錄</div>`}
             </div>`).join('')}
@@ -766,8 +768,6 @@ async function onAct(e){
       state.screen = 'nurse-case-management';
       render();
       break;
-    case 'print-student':
-      printStudentCard(el.dataset.id); break;
     case 'export-roster-excel':
       exportRosterToExcel(); break;
 
@@ -971,13 +971,14 @@ async function saveTreatment(){
   }
 }
 
-/* ---------------- 匯出完整名冊 Excel ---------------- */
+/* ---------------- 匯出名冊 Excel（依目前搜尋結果） ---------------- */
 function exportRosterToExcel(){
-  if(state.rosterFull.length === 0){
-    showToast('目前名冊沒有資料可以匯出');
+  const list = filterRosterFull();
+  if(list.length === 0){
+    showToast('目前沒有資料可以匯出');
     return;
   }
-  const rows = state.rosterFull.map(r => ({
+  const rows = list.map(r => ({
     '學號': r.id,
     '姓名': r.name,
     '班級': r.class,
@@ -987,50 +988,10 @@ function exportRosterToExcel(){
   ws['!cols'] = [{wch:10},{wch:10},{wch:12},{wch:30}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '學生名冊');
-  XLSX.writeFile(wb, `學生名冊_完整_${todayStr(0)}.xlsx`);
+  const q = (state.caseSearch||'').trim();
+  const fname = q ? `學生名冊_搜尋_${q}_${todayStr(0)}.xlsx` : `學生名冊_完整_${todayStr(0)}.xlsx`;
+  XLSX.writeFile(wb, fname);
   showToast('已匯出 Excel');
-}
-
-/* ---------------- 列印學生卡 ---------------- */
-function printStudentCard(studentId){
-  const r = state.rosterFull.find(s => s.id === studentId);
-  if(!r){
-    showToast('找不到這位學生的資料');
-    return;
-  }
-  const win = window.open('', '_blank', 'width=480,height=640');
-  if(!win){
-    showToast('瀏覽器擋住了列印視窗，請允許彈出視窗後再試一次');
-    return;
-  }
-  const html = `<!DOCTYPE html>
-<html lang="zh-Hant"><head><meta charset="UTF-8"><title>學生卡 - ${r.name}</title>
-<style>
-  body{font-family:'Noto Sans TC',sans-serif;padding:32px;color:#1C2B2A;}
-  h1{font-size:20px;margin:0 0 4px;}
-  .sub{color:#5C7370;font-size:13px;margin-bottom:24px;}
-  .row{display:flex;padding:10px 0;border-bottom:1px solid #DCE8E6;}
-  .row .k{width:80px;color:#5C7370;font-size:14px;}
-  .row .v{flex:1;font-size:15px;font-weight:600;}
-  .history{margin-top:20px;padding:14px 16px;background:#FBECE9;color:#C1533F;border-radius:8px;font-size:14px;line-height:1.6;}
-  .history .k{font-weight:700;display:block;margin-bottom:4px;}
-</style></head>
-<body>
-  <h1>學生基本資料卡</h1>
-  <div class="sub">健康中心報到系統</div>
-  <div class="row"><div class="k">姓名</div><div class="v">${r.name}</div></div>
-  <div class="row"><div class="k">學號</div><div class="v">${r.id}</div></div>
-  <div class="row"><div class="k">班級</div><div class="v">${r.class}</div></div>
-  <div class="history">
-    <span class="k">病史</span>
-    ${r.history ? r.history : '（無病史紀錄）'}
-  </div>
-</body></html>`;
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 300);
 }
 
 /* ---------------- 匯出 Excel ---------------- */
