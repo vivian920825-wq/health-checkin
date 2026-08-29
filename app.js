@@ -29,9 +29,10 @@ const TREATMENT_OPTIONS = ['傷口護理','冰敷','熱敷','休息觀察','告�
 const REASON_DETAIL_OPTIONS = Array.from(new Set([...ILLNESS_REASONS, ...INJURY_REASONS]));
 
 const HEALTH_CHECK_ITEMS = [
-  '血壓 mmHg', '血糖(AC)', 'T-CHOL mg/dl','T-G mg/dl', 'SGOT IU/L', 'SGPT IU/L',
+  '血壓 mmHg', '血糖(AC)', 'T-CHOL mg/dl', 'T-G mg/dl', 'SGOT IU/L', 'SGPT IU/L',
   '尿酸 mg/dl', '高密度脂蛋白膽固醇_HDL', '胸部X光', '心電圖'
 ];
+const EDU_GUIDANCE_OPTIONS = ['飲食控制', '運動管理', '體重管理', '定期追蹤', '生活作息'];
 
 let state = {
   screen: 'home',
@@ -61,6 +62,7 @@ let state = {
   healthCheckStudentId: null,
   healthCheckStudent: null,
   healthCheckItems: {},
+  healthCheckGuidance: [],
   healthCheckNote: '',
   healthCheckBusy: false,
   healthCheckLoading: false,
@@ -154,6 +156,7 @@ async function loadHealthCheck(studentId){
     const data = await apiGet('getHealthCheck', { token: state.sessionToken, studentId: studentId });
     if(data && data.ok){
       state.healthCheckItems = data.items || {};
+      state.healthCheckGuidance = data.guidance || [];
       state.healthCheckNote = data.note || '';
     } else if(data && data.error === 'unauthorized'){
       state.loggedIn = false;
@@ -617,6 +620,12 @@ function nurseHealthCheck(){
         <div class="choice-btn hc-abnormal" data-act="toggle-hc-abnormal" data-item="${item}" style="flex:none;padding:10px 14px;font-size:13px;${entry.abnormal ? 'background:var(--injury);color:#fff;' : ''}">異常</div>
       </div>`;
     }).join('')}
+    <div class="field-group" style="margin-top:22px;">
+      <label>衛教指導</label>
+      <div class="choice-grid">
+        ${EDU_GUIDANCE_OPTIONS.map(o=>`<div class="choice-btn ${state.healthCheckGuidance.includes(o)?'selected':''}" data-act="toggle-hc-guidance" data-val="${o}">${o}</div>`).join('')}
+      </div>
+    </div>
     <div class="field-group" style="margin-top:18px;">
       <label>備註</label>
       <textarea id="hc-note" rows="3" style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface-soft);font-family:var(--font-body);font-size:15px;">${state.healthCheckNote}</textarea>
@@ -859,6 +868,7 @@ async function onAct(e){
       state.healthCheckStudentId = studentId;
       state.healthCheckStudent = state.rosterFull.find(r => r.id === studentId) || null;
       state.healthCheckItems = {};
+      state.healthCheckGuidance = [];
       state.healthCheckNote = '';
       state.healthCheckLoading = true;
       state.screen = 'nurse-health-check';
@@ -874,6 +884,13 @@ async function onAct(e){
       const item = el.dataset.item;
       if(!state.healthCheckItems[item]) state.healthCheckItems[item] = {value:'', abnormal:false};
       state.healthCheckItems[item].abnormal = !state.healthCheckItems[item].abnormal;
+      render();
+      break;
+    }
+    case 'toggle-hc-guidance': {
+      const v = el.dataset.val;
+      const idx = state.healthCheckGuidance.indexOf(v);
+      if(idx === -1) state.healthCheckGuidance.push(v); else state.healthCheckGuidance.splice(idx,1);
       render();
       break;
     }
@@ -1087,11 +1104,14 @@ async function saveHealthCheck(){
       token: state.sessionToken,
       studentId: state.healthCheckStudentId,
       items: state.healthCheckItems,
+      guidance: state.healthCheckGuidance,
       note: state.healthCheckNote
     });
     if(res && res.ok){
       const abnormalList = HEALTH_CHECK_ITEMS.filter(item => state.healthCheckItems[item] && state.healthCheckItems[item].abnormal);
-      state.rosterFull = state.rosterFull.map(r => r.id === state.healthCheckStudentId ? {...r, healthAbnormal: abnormalList} : r);
+      state.rosterFull = state.rosterFull.map(r => r.id === state.healthCheckStudentId
+        ? {...r, healthAbnormal: abnormalList, healthItems: state.healthCheckItems, healthGuidance: state.healthCheckGuidance}
+        : r);
       state.healthCheckBusy = false;
       state.screen = 'nurse-case-management';
       render();
@@ -1116,14 +1136,28 @@ function exportRosterToExcel(){
     showToast('目前沒有資料可以匯出');
     return;
   }
-  const rows = list.map(r => ({
-    '學號': r.id,
-    '姓名': r.name,
-    '班級': r.class,
-    '病史': r.history || '',
-  }));
+  const rows = list.map(r => {
+    const row = {
+      '學號': r.id,
+      '姓名': r.name,
+      '班級': r.class,
+      '病史': r.history || '',
+    };
+    HEALTH_CHECK_ITEMS.forEach(item => {
+      const entry = (r.healthItems && r.healthItems[item]) || {value:'', abnormal:false};
+      row[item + '_數值'] = entry.value || '';
+      row[item + '_異常'] = entry.abnormal ? 1 : '';
+    });
+    EDU_GUIDANCE_OPTIONS.forEach(g => {
+      row[g] = (r.healthGuidance||[]).includes(g) ? 1 : '';
+    });
+    return row;
+  });
   const ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:10},{wch:10},{wch:12},{wch:30}];
+  const baseWidths = [10,10,12,30];
+  const hcWidths = HEALTH_CHECK_ITEMS.reduce((arr)=>arr.concat([10,6]), []);
+  const guidanceWidths = new Array(EDU_GUIDANCE_OPTIONS.length).fill(8);
+  ws['!cols'] = [...baseWidths, ...hcWidths, ...guidanceWidths].map(w=>({wch:w}));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '學生名冊');
   const q = (state.caseSearch||'').trim();
