@@ -878,7 +878,7 @@ async function onAct(e){
       render();
       break;
     case 'export-roster-excel':
-      exportRosterToExcel(); break;
+      await exportRosterToExcel(); break;
 
     case 'go-health-check': {
       const studentId = el.dataset.id;
@@ -1147,40 +1147,78 @@ async function saveHealthCheck(){
 }
 
 /* ---------------- 匯出名冊 Excel（依目前搜尋結果） ---------------- */
-function exportRosterToExcel(){
+async function exportRosterToExcel(){
   const list = filterRosterFull();
   if(list.length === 0){
     showToast('目前沒有資料可以匯出');
     return;
   }
-  const rows = list.map(r => {
-    const row = {
-      '學號': r.id,
-      '姓名': r.name,
-      '班級': r.class,
-      '病史': r.history || '',
-    };
-    HEALTH_CHECK_ITEMS.forEach(item => {
-      const entry = (r.healthItems && r.healthItems[item]) || {value:'', abnormal:false};
-      row[item + '_數值'] = entry.value || '';
-      row[item + '_異常'] = entry.abnormal ? 1 : '';
-    });
-    EDU_GUIDANCE_OPTIONS.forEach(g => {
-      row[g] = (r.healthGuidance||[]).includes(g) ? 1 : '';
-    });
-    return row;
+  if(typeof ExcelJS === 'undefined'){
+    showToast('匯出功能載入失敗，請重新整理頁面後再試');
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('學生名冊');
+
+  const columns = [
+    { header:'學號', key:'id', width:10 },
+    { header:'姓名', key:'name', width:10 },
+    { header:'班級', key:'class', width:12 },
+    { header:'病史', key:'history', width:26 },
+  ];
+  HEALTH_CHECK_ITEMS.forEach(item=>{
+    columns.push({ header:item+'（數值）', key:item+'_v', width:12 });
+    columns.push({ header:item+'（異常）', key:item+'_a', width:10 });
   });
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const baseWidths = [10,10,12,30];
-  const hcWidths = HEALTH_CHECK_ITEMS.reduce((arr)=>arr.concat([10,6]), []);
-  const guidanceWidths = new Array(EDU_GUIDANCE_OPTIONS.length).fill(8);
-  ws['!cols'] = [...baseWidths, ...hcWidths, ...guidanceWidths].map(w=>({wch:w}));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '學生名冊');
-  const q = (state.caseSearch||'').trim();
-  const fname = q ? `學生名冊_搜尋_${q}_${todayStr(0)}.xlsx` : `學生名冊_完整_${todayStr(0)}.xlsx`;
-  XLSX.writeFile(wb, fname);
-  showToast('已匯出 Excel');
+  EDU_GUIDANCE_OPTIONS.forEach(g=>{
+    columns.push({ header:g, key:'g_'+g, width:9 });
+  });
+  columns.push({ header:'備註', key:'note', width:30 });
+  ws.columns = columns;
+  ws.getRow(1).font = { bold:true };
+  ws.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFDCEEEC'} };
+
+  list.forEach(r=>{
+    const rowData = { id:r.id, name:r.name, class:r.class, history:r.history || '', note:r.healthNote || '' };
+    HEALTH_CHECK_ITEMS.forEach(item=>{
+      const entry = (r.healthItems && r.healthItems[item]) || {value:'', abnormal:false};
+      rowData[item+'_v'] = entry.value || '';
+      rowData[item+'_a'] = entry.abnormal ? '異常' : '';
+    });
+    EDU_GUIDANCE_OPTIONS.forEach(g=>{
+      rowData['g_'+g] = (r.healthGuidance||[]).includes(g) ? '✓' : '';
+    });
+    const row = ws.addRow(rowData);
+
+    HEALTH_CHECK_ITEMS.forEach(item=>{
+      const entry = (r.healthItems && r.healthItems[item]) || {value:'', abnormal:false};
+      if(entry.abnormal){
+        [row.getCell(item+'_v'), row.getCell(item+'_a')].forEach(cell=>{
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFC1533F'} };
+          cell.font = { color:{argb:'FFFFFFFF'}, bold:true };
+        });
+      }
+    });
+  });
+
+  try{
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type:'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const q = (state.caseSearch||'').trim();
+    a.download = q ? `學生名冊_搜尋_${q}_${todayStr(0)}.xlsx` : `學生名冊_完整_${todayStr(0)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('已匯出 Excel');
+  }catch(err){
+    console.error(err);
+    showToast('匯出失敗，請稍後再試一次');
+  }
 }
 
 /* ---------------- 匯出 Excel ---------------- */
