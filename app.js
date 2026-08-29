@@ -1127,7 +1127,7 @@ async function saveHealthCheck(){
     if(res && res.ok){
       const abnormalList = HEALTH_CHECK_ITEMS.filter(item => state.healthCheckItems[item] && state.healthCheckItems[item].abnormal);
       state.rosterFull = state.rosterFull.map(r => r.id === state.healthCheckStudentId
-        ? {...r, healthAbnormal: abnormalList, healthItems: state.healthCheckItems, healthGuidance: state.healthCheckGuidance}
+        ? {...r, healthAbnormal: abnormalList, healthItems: state.healthCheckItems, healthGuidance: state.healthCheckGuidance, healthNote: state.healthCheckNote}
         : r);
       state.healthCheckBusy = false;
       state.screen = 'nurse-case-management';
