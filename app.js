@@ -530,7 +530,10 @@ function nurseCaseManagement(){
   <div class="card">
     <h1 class="title">學生個案搜尋</h1>
     <p class="subtitle" style="margin-bottom:14px;">可用姓名、學號、班級，或直接搜病史內容（例如「氣喘」）找出相關學生。</p>
-    <input class="search-input" id="case-search" placeholder="搜尋姓名、學號、班級或病史" value="${q}">
+    <div class="dash-toolbar">
+      <input class="search-input" id="case-search" placeholder="搜尋姓名、學號、班級或病史" value="${q}">
+      <button class="pill-btn" data-act="export-roster-excel">${ICONS.download} 匯出完整 Excel</button>
+    </div>
     ${
       list.length === 0
       ? `<div class="empty-note">${state.rosterFull.length===0 ? '尚未匯入學生名冊' : '找不到符合的學生'}</div>`
@@ -765,6 +768,8 @@ async function onAct(e){
       break;
     case 'print-student':
       printStudentCard(el.dataset.id); break;
+    case 'export-roster-excel':
+      exportRosterToExcel(); break;
 
     case 'range-preset':
       state.dashFrom = todayStr(-Number(el.dataset.days));
@@ -964,6 +969,26 @@ async function saveTreatment(){
     showToast('無法連線，請稍後再試一次');
     render();
   }
+}
+
+/* ---------------- 匯出完整名冊 Excel ---------------- */
+function exportRosterToExcel(){
+  if(state.rosterFull.length === 0){
+    showToast('目前名冊沒有資料可以匯出');
+    return;
+  }
+  const rows = state.rosterFull.map(r => ({
+    '學號': r.id,
+    '姓名': r.name,
+    '班級': r.class,
+    '病史': r.history || '',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:10},{wch:10},{wch:12},{wch:30}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '學生名冊');
+  XLSX.writeFile(wb, `學生名冊_完整_${todayStr(0)}.xlsx`);
+  showToast('已匯出 Excel');
 }
 
 /* ---------------- 列印學生卡 ---------------- */
