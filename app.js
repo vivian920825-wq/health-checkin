@@ -23,6 +23,8 @@ const SECTIONS = ['甲','乙','丙','丁','戊','己'];
 const ILLNESS_REASONS = ['發燒','昏眩','噁心嘔吐','頭痛','牙痛','胃痛','腹痛','腹瀉','經痛','氣喘','流鼻血','疹癢','眼疾','過敏','其它'];
 const INJURY_REASONS = ['擦傷','裂割刺傷','夾壓傷','挫撞傷','扭傷','灼燙傷','叮咬傷','骨折','舊傷','肌肉拉傷','甲溝炎','起水泡','其它'];
 
+const TREATMENT_OPTIONS = ['傷口護理','冰敷','熱敷','休息觀察','告知家長','通知導師','家長帶回','校方送醫','衛生教育','生理食鹽水沖洗','口罩給予','止血','擦藥','禁食','溫開水給予','補充糖水','補充水分','體溫監測','血氧監測','彈繃固定','氧氣給與','熱敷觀察','三角巾固定','頸圈固定','夾板固定','KED固定','長背板固定','保暖','CPR+AED','哈姆立克法','通知家長送醫','家長同意自行返家','家長同意自行就醫','家長未接聽到電話','電訪追蹤','救護車護送','教官或導師送醫','其它'];
+
 let state = {
   screen: 'home',
   loading: true,
@@ -30,13 +32,25 @@ let state = {
   roster: [],
   records: [],
   loggedIn: false,
+  sessionToken: null,
   toast: null,
   student: { grade:null, section:null, id:null, name:null, gender:null, reason:null, detail:null },
   loginErr: '',
   loginBusy: false,
   search: '',
   dashSearch: '',
+  dashFrom: '',
+  dashTo: '',
+  pwdOld: '',
+  pwdErr: '',
+  pwdBusy: false,
+  treatmentRecordId: null,
+  treatmentSelected: [],
+  treatmentOther: '',
+  treatmentBusy: false,
 };
+
+let chartInstance = null;
 
 let refreshTimer = null;
 
@@ -47,31 +61,58 @@ function showToast(msg){
 }
 
 /* ---------------- init ---------------- */
+function todayStr(offsetDays){
+  const d = new Date();
+  d.setDate(d.getDate() + (offsetDays||0));
+  return d.toISOString().slice(0,10);
+}
+
 async function init(){
+  state.dashFrom = todayStr(-6);
+  state.dashTo = todayStr(0);
   if(!urlConfigured()){
     state.loading = false;
     render();
     return;
   }
-  await loadData();
+  await loadRoster();
+  state.loading = false;
   render();
 }
 
-async function loadData(){
+async function loadRoster(){
   try{
-    const data = await apiGet('getData');
+    const data = await apiGet('getRoster');
     if(data && data.ok){
       state.roster = data.roster || [];
-      state.records = data.records || [];
       state.loadError = null;
     } else {
-      state.loadError = '讀取資料失敗，請確認 Apps Script 是否部署成功';
+      state.loadError = '讀取名冊失敗，請確認 Apps Script 是否部署成功';
     }
   }catch(e){
     console.error(e);
     state.loadError = '無法連線到資料庫，請檢查網路連線或 Apps Script 網址設定';
   }
-  state.loading = false;
+}
+
+async function loadRecords(){
+  try{
+    const data = await apiGet('getRecords', { token: state.sessionToken });
+    if(data && data.ok){
+      state.records = data.records || [];
+      state.loadError = null;
+    } else if(data && data.error === 'unauthorized'){
+      state.loggedIn = false;
+      state.sessionToken = null;
+      state.screen = 'nurse-login';
+      state.loginErr = '登入已逾時，請重新登入';
+    } else {
+      state.loadError = '讀取報到紀錄失敗';
+    }
+  }catch(e){
+    console.error(e);
+    state.loadError = '無法連線到資料庫，請檢查網路連線';
+  }
 }
 
 /* ---------------- icons ---------------- */
@@ -87,6 +128,8 @@ const ICONS = {
   trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-9 0 1 14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-14"/></svg>`,
   done: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
   refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v6h-6"/></svg>`,
+  clipboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M9 11h6M9 15h6"/></svg>`,
+  download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>`,
 };
 
 function stepperSvg(step, total){
@@ -160,15 +203,19 @@ function render(){
     ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
   `;
   bindEvents();
+  if(state.screen === 'nurse-dashboard') renderChart();
 }
 
 function headerRight(){
   if(state.screen === 'home') return '';
   if(state.screen.startsWith('student')) return `<button class="pill-btn" data-act="go-home">回首頁</button>`;
   if(state.screen === 'nurse-login') return `<button class="pill-btn" data-act="go-home">回首頁</button>`;
+  if(state.screen === 'nurse-change-password') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
+  if(state.screen === 'nurse-record-treatment') return `<button class="pill-btn" data-act="back-dashboard">回儀表板</button>`;
   if(state.screen === 'nurse-dashboard'){
     return `
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="pill-btn" data-act="go-change-password">修改密碼</button>
         <button class="pill-btn" data-act="refresh-dashboard">${ICONS.refresh} 重新整理</button>
         <button class="pill-btn" data-act="logout">${ICONS.logout} 登出</button>
       </div>`;
@@ -186,7 +233,9 @@ function screenHtml(){
     case 'student-5': return studentStep5();
     case 'student-done': return studentDone();
     case 'nurse-login': return nurseLogin();
+    case 'nurse-change-password': return nurseChangePassword();
     case 'nurse-dashboard': return nurseDashboard();
+    case 'nurse-record-treatment': return nurseRecordTreatment();
     default: return homeScreen();
   }
 }
@@ -376,24 +425,107 @@ function nurseLogin(){
     <div class="btn-row">
       <button class="btn btn-primary" id="login-btn" data-act="do-login" style="width:100%;" ${state.loginBusy?'disabled':''}>${state.loginBusy ? '登入中…' : '登入'}</button>
     </div>
-    <div class="login-hint">預設示範帳號：nurse／密碼：1234（帳號存在 Google 試算表的「護理帳號」分頁，可直接到試算表修改或新增）</div>
+    <div class="login-hint">預設示範帳號：nurse／密碼：1234（密碼已加密存放，建議登入後立即到「修改密碼」更換）</div>
+  </div>`;
+}
+
+/* ---- NURSE CHANGE PASSWORD ---- */
+function nurseChangePassword(){
+  return `
+  <div class="card" style="max-width:420px;margin:20px auto 0;">
+    <h1 class="title">修改密碼</h1>
+    <p class="subtitle">請輸入目前密碼與新密碼</p>
+    <div class="field-group">
+      <label>目前密碼</label>
+      <input id="pwd-old" type="password">
+    </div>
+    <div class="field-group">
+      <label>新密碼（至少 4 個字元）</label>
+      <input id="pwd-new" type="password">
+    </div>
+    <div class="field-group">
+      <label>再輸入一次新密碼</label>
+      <input id="pwd-confirm" type="password">
+    </div>
+    ${state.pwdErr ? `<div class="error-text">${state.pwdErr}</div>` : ''}
+    <div class="btn-row">
+      <button class="btn btn-ghost" data-act="back-dashboard">取消</button>
+      <button class="btn btn-primary" data-act="do-change-password" ${state.pwdBusy?'disabled':''}>${state.pwdBusy ? '處理中…' : '確認修改'}</button>
+    </div>
+  </div>`;
+}
+
+/* ---- NURSE RECORD TREATMENT ---- */
+function nurseRecordTreatment(){
+  const rec = state.records.find(r => r.recordId === state.treatmentRecordId);
+  if(!rec){
+    return `<div class="card"><div class="empty-note">找不到這筆紀錄，可能已被刪除。</div>
+      <div class="btn-row"><button class="btn btn-primary" data-act="back-dashboard" style="width:100%;">回儀表板</button></div></div>`;
+  }
+  const sel = state.treatmentSelected;
+  return `
+  <div class="card">
+    <h1 class="title">護理處置</h1>
+    <p class="subtitle">${rec.name}（${rec.id}）・ ${rec.class} ・ ${rec.reason}${rec.detail ? '・'+rec.detail : ''}</p>
+    <div class="choice-grid">
+      ${TREATMENT_OPTIONS.map(o=>`<div class="choice-btn ${sel.includes(o)?'selected':''}" data-act="toggle-treatment" data-val="${o}">${o}</div>`).join('')}
+    </div>
+    ${sel.includes('其它') ? `
+      <div class="field-group" style="margin-top:16px;">
+        <label>其它（請說明）</label>
+        <input id="treatment-other" type="text" value="${state.treatmentOther}" placeholder="請輸入處置內容">
+      </div>
+    ` : ''}
+    <div class="btn-row">
+      <button class="btn btn-ghost" data-act="back-dashboard">取消</button>
+      <button class="btn btn-primary" data-act="save-treatment" ${state.treatmentBusy?'disabled':''}>${state.treatmentBusy ? '儲存中…' : '儲存'}</button>
+    </div>
   </div>`;
 }
 
 /* ---- NURSE DASHBOARD ---- */
 function nurseDashboard(){
-  const total = state.records.length;
-  const illnessCount = state.records.filter(r=>r.reason==='身體不適').length;
-  const injuryCount = state.records.filter(r=>r.reason==='受傷').length;
+  const rangeRecords = filterByDateRange(state.records, state.dashFrom, state.dashTo);
+  const total = rangeRecords.length;
+  const illnessCount = rangeRecords.filter(r=>r.reason==='身體不適').length;
+  const injuryCount = rangeRecords.filter(r=>r.reason==='受傷').length;
+
   const q = (state.dashSearch||'').trim();
-  let list = [...state.records].sort((a,b)=> b.ts - a.ts);
+  let list = [...rangeRecords].sort((a,b)=> b.ts - a.ts);
   if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q));
 
   return `
+  <div class="card" style="margin-bottom:18px;">
+    <h1 class="title" style="font-size:18px;">查看區間</h1>
+    <div class="dash-toolbar">
+      <div class="field-group" style="margin-bottom:0;flex:1;min-width:140px;">
+        <label>起始日期</label>
+        <input type="date" id="dash-from" value="${state.dashFrom}">
+      </div>
+      <div class="field-group" style="margin-bottom:0;flex:1;min-width:140px;">
+        <label>結束日期</label>
+        <input type="date" id="dash-to" value="${state.dashTo}">
+      </div>
+    </div>
+    <div class="dash-toolbar" style="margin-top:4px;">
+      <button class="pill-btn" data-act="range-preset" data-days="0">今天</button>
+      <button class="pill-btn" data-act="range-preset" data-days="6">近 7 天</button>
+      <button class="pill-btn" data-act="range-preset" data-days="29">近 30 天</button>
+      <button class="pill-btn" data-act="range-all">全部紀錄</button>
+    </div>
+  </div>
+
   <div class="stat-row">
-    <div class="stat-card"><div class="num">${total}</div><div class="lbl">總報到人次</div></div>
+    <div class="stat-card"><div class="num">${total}</div><div class="lbl">區間總人次</div></div>
     <div class="stat-card"><div class="num" style="color:var(--illness)">${illnessCount}</div><div class="lbl">身體不適</div></div>
     <div class="stat-card"><div class="num" style="color:var(--injury)">${injuryCount}</div><div class="lbl">受傷</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <h1 class="title" style="font-size:18px;">每日報到趨勢</h1>
+    <div style="position:relative;height:220px;">
+      <canvas id="trend-chart"></canvas>
+    </div>
   </div>
 
   <div class="card" style="margin-bottom:18px;">
@@ -408,13 +540,14 @@ function nurseDashboard(){
   </div>
 
   <div class="card">
-    <h1 class="title" style="font-size:18px;">報到紀錄</h1>
+    <h1 class="title" style="font-size:18px;">報到紀錄（區間內）</h1>
     <div class="dash-toolbar">
       <input class="search-input" id="dash-search" placeholder="搜尋姓名、學號或班級" value="${q}">
+      <button class="pill-btn" data-act="export-excel">${ICONS.download} 匯出 Excel</button>
     </div>
     ${
       list.length === 0
-      ? `<div class="empty-note">目前沒有符合的報到紀錄</div>`
+      ? `<div class="empty-note">此區間內沒有符合的報到紀錄</div>`
       : `<div class="record-list">
           ${list.map(r=>`
             <div class="record-card ${r.status==='done'?'done':''}">
@@ -426,8 +559,10 @@ function nurseDashboard(){
                   <span class="rc-class">${r.class}・${r.gender}</span>
                 </div>
                 <div class="rc-meta">${r.reason}${r.detail ? '・'+r.detail : ''} ・ ${formatTime(r.ts)} ${r.status==='done' ? '・ 已處理' : ''}</div>
+                ${r.treatment ? `<div class="rc-meta" style="color:var(--primary-dark);">處置：${r.treatment}</div>` : ''}
               </div>
               <div class="rc-actions">
+                <div class="icon-btn" data-act="open-treatment" data-id="${r.recordId}" title="護理處置">${ICONS.clipboard}</div>
                 <div class="icon-btn" data-act="toggle-status" data-id="${r.recordId}" title="標記已處理">${ICONS.done}</div>
                 <div class="icon-btn danger" data-act="delete-record" data-id="${r.recordId}" title="刪除">${ICONS.trash}</div>
               </div>
@@ -435,6 +570,72 @@ function nurseDashboard(){
         </div>`
     }
   </div>`;
+}
+
+function filterByDateRange(records, from, to){
+  if(!from && !to) return records;
+  const fromTs = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
+  const toTs = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
+  return records.filter(r => r.ts >= fromTs && r.ts <= toTs);
+}
+
+function renderChart(){
+  const canvas = document.getElementById('trend-chart');
+  if(!canvas || typeof Chart === 'undefined') return;
+
+  const rangeRecords = filterByDateRange(state.records, state.dashFrom, state.dashTo);
+
+  // build ordered list of day labels between from/to (fallback: use records' own date span)
+  let fromDate = state.dashFrom ? new Date(state.dashFrom + 'T00:00:00') : null;
+  let toDate = state.dashTo ? new Date(state.dashTo + 'T00:00:00') : null;
+  if(!fromDate || !toDate){
+    if(rangeRecords.length === 0){
+      fromDate = new Date(); toDate = new Date();
+    } else {
+      const tsList = rangeRecords.map(r=>r.ts);
+      fromDate = new Date(Math.min(...tsList));
+      toDate = new Date(Math.max(...tsList));
+    }
+  }
+  const days = [];
+  const cursor = new Date(fromDate);
+  while(cursor <= toDate && days.length < 366){
+    days.push(cursor.toISOString().slice(0,10));
+    cursor.setDate(cursor.getDate()+1);
+  }
+
+  const illnessByDay = {}, injuryByDay = {};
+  days.forEach(d=>{ illnessByDay[d]=0; injuryByDay[d]=0; });
+  rangeRecords.forEach(r=>{
+    const d = new Date(r.ts).toISOString().slice(0,10);
+    if(!(d in illnessByDay)) return;
+    if(r.reason === '身體不適') illnessByDay[d]++; else injuryByDay[d]++;
+  });
+
+  const labels = days.map(d => d.slice(5)); // MM-DD
+  const illnessData = days.map(d => illnessByDay[d]);
+  const injuryData = days.map(d => injuryByDay[d]);
+
+  if(chartInstance){ chartInstance.destroy(); chartInstance = null; }
+  chartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label:'身體不適', data: illnessData, backgroundColor: '#3D7FBF', borderRadius: 4 },
+        { label:'受傷', data: injuryData, backgroundColor: '#C1533F', borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, grid:{ display:false } },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+      },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
 }
 
 function formatTime(ts){
@@ -456,6 +657,18 @@ function bindEvents(){
   if(dashSearch){
     dashSearch.addEventListener('input', e=>{ state.dashSearch = e.target.value; render(); preserveFocus('dash-search'); });
   }
+  const dashFrom = document.getElementById('dash-from');
+  if(dashFrom){
+    dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; render(); });
+  }
+  const dashTo = document.getElementById('dash-to');
+  if(dashTo){
+    dashTo.addEventListener('change', e=>{ state.dashTo = e.target.value; render(); });
+  }
+  const treatmentOther = document.getElementById('treatment-other');
+  if(treatmentOther){
+    treatmentOther.addEventListener('input', e=>{ state.treatmentOther = e.target.value; });
+  }
   const rosterFile = document.getElementById('roster-file');
   if(rosterFile){
     rosterFile.addEventListener('change', handleRosterFile);
@@ -472,7 +685,7 @@ function manageAutoRefresh(){
   if(refreshTimer){ clearInterval(refreshTimer); refreshTimer = null; }
   if(state.screen === 'nurse-dashboard'){
     refreshTimer = setInterval(async ()=>{
-      await loadData();
+      await loadRecords();
       render();
     }, 20000); // 每 20 秒自動重新整理一次
   }
@@ -538,20 +751,60 @@ async function onAct(e){
     case 'do-login':
       await doLogin(); break;
     case 'logout':
-      state.loggedIn = false; state.screen = 'home'; render(); break;
+      state.loggedIn = false; state.sessionToken = null; state.records = []; state.screen = 'home'; render(); break;
     case 'refresh-dashboard':
       state.loading = true; render();
-      await loadData(); render();
+      await loadRecords(); state.loading = false; render();
       showToast('已重新整理');
       break;
+
+    case 'go-change-password':
+      state.pwdErr = ''; state.screen = 'nurse-change-password'; render(); break;
+    case 'back-dashboard':
+      state.screen = 'nurse-dashboard'; render(); break;
+    case 'do-change-password':
+      await doChangePassword(); break;
+
+    case 'range-preset':
+      state.dashFrom = todayStr(-Number(el.dataset.days));
+      state.dashTo = todayStr(0);
+      render(); break;
+    case 'range-all':
+      state.dashFrom = ''; state.dashTo = '';
+      render(); break;
 
     case 'toggle-status':
       await toggleStatus(el.dataset.id); break;
     case 'delete-record':
       await deleteRecord(el.dataset.id); break;
+
+    case 'open-treatment': {
+      const rec = state.records.find(r => r.recordId === el.dataset.id);
+      state.treatmentRecordId = el.dataset.id;
+      const parsed = parseTreatmentString(rec ? rec.treatment : '');
+      state.treatmentSelected = parsed.options;
+      state.treatmentOther = parsed.other;
+      state.screen = 'nurse-record-treatment';
+      render();
+      break;
+    }
+    case 'toggle-treatment': {
+      const v = el.dataset.val;
+      const idx = state.treatmentSelected.indexOf(v);
+      if(idx === -1) state.treatmentSelected.push(v); else state.treatmentSelected.splice(idx,1);
+      if(v === '其它' && idx !== -1) state.treatmentOther = '';
+      render();
+      break;
+    }
+    case 'save-treatment':
+      await saveTreatment(); break;
+
+    case 'export-excel':
+      exportRecordsToExcel(); break;
+
     case 'clear-roster':
       if(confirm('確定要清空整份學生名冊嗎？此動作無法復原。')){
-        await apiPost('clearRoster', {});
+        await apiPost('clearRoster', { token: state.sessionToken });
         state.roster = [];
         render();
         showToast('名冊已清空');
@@ -594,12 +847,13 @@ async function doLogin(){
   try{
     const res = await apiPost('login', { account: acc, password: pwd });
     if(res && res.ok && res.success){
-      state.loggedIn = true; state.loginErr='';
+      state.loggedIn = true; state.loginErr=''; state.sessionToken = res.token;
       state.loading = true; render();
-      await loadData();
+      await loadRecords();
+      state.loading = false;
       state.screen = 'nurse-dashboard';
     } else {
-      state.loginErr = '帳號或密碼錯誤，請再試一次';
+      state.loginErr = (res && res.error) || '帳號或密碼錯誤，請再試一次';
     }
   }catch(err){
     console.error(err);
@@ -609,6 +863,36 @@ async function doLogin(){
   render();
 }
 
+async function doChangePassword(){
+  const oldPwd = document.getElementById('pwd-old').value;
+  const newPwd = document.getElementById('pwd-new').value;
+  const confirmPwd = document.getElementById('pwd-confirm').value;
+  state.pwdErr = '';
+  if(newPwd !== confirmPwd){
+    state.pwdErr = '兩次輸入的新密碼不一致';
+    render(); return;
+  }
+  state.pwdBusy = true; render();
+  try{
+    const res = await apiPost('changePassword', { token: state.sessionToken, oldPassword: oldPwd, newPassword: newPwd });
+    if(res && res.ok && res.success){
+      state.pwdBusy = false;
+      state.screen = 'nurse-dashboard';
+      render();
+      showToast('密碼已更新');
+    } else {
+      state.pwdErr = (res && res.error) || '修改失敗，請再試一次';
+      state.pwdBusy = false;
+      render();
+    }
+  }catch(err){
+    console.error(err);
+    state.pwdErr = '無法連線到伺服器，請稍後再試';
+    state.pwdBusy = false;
+    render();
+  }
+}
+
 async function toggleStatus(id){
   const rec = state.records.find(r=>r.recordId===id);
   if(!rec) return;
@@ -616,7 +900,7 @@ async function toggleStatus(id){
   state.records = state.records.map(r => r.recordId===id ? {...r, status:newStatus} : r);
   render();
   try{
-    await apiPost('updateRecordStatus', { recordId:id, status:newStatus });
+    await apiPost('updateRecordStatus', { token: state.sessionToken, recordId:id, status:newStatus });
   }catch(err){
     console.error(err);
     showToast('狀態更新失敗，請重新整理後再試');
@@ -628,11 +912,89 @@ async function deleteRecord(id){
   state.records = state.records.filter(r=>r.recordId!==id);
   render();
   try{
-    await apiPost('deleteRecord', { recordId:id });
+    await apiPost('deleteRecord', { token: state.sessionToken, recordId:id });
   }catch(err){
     console.error(err);
     showToast('刪除失敗，請重新整理後再試');
   }
+}
+
+/* ---------------- 護理處置 ---------------- */
+function parseTreatmentString(str){
+  if(!str) return { options: [], other: '' };
+  const parts = str.split('、').map(s=>s.trim()).filter(Boolean);
+  const options = [];
+  let other = '';
+  parts.forEach(p=>{
+    if(p.startsWith('其它：') || p.startsWith('其它:')){
+      options.push('其它');
+      other = p.replace(/^其它[：:]/, '');
+    } else if(TREATMENT_OPTIONS.includes(p)){
+      options.push(p);
+    }
+  });
+  return { options, other };
+}
+
+function buildTreatmentString(options, other){
+  return options.map(o => o === '其它' ? `其它：${other||''}` : o).join('、');
+}
+
+async function saveTreatment(){
+  const treatmentStr = buildTreatmentString(state.treatmentSelected, state.treatmentOther);
+  state.treatmentBusy = true; render();
+  try{
+    const res = await apiPost('updateTreatment', { token: state.sessionToken, recordId: state.treatmentRecordId, treatment: treatmentStr });
+    if(res && res.ok){
+      state.records = state.records.map(r => r.recordId===state.treatmentRecordId ? {...r, treatment: treatmentStr} : r);
+      state.treatmentBusy = false;
+      state.screen = 'nurse-dashboard';
+      render();
+      showToast('護理處置已儲存');
+    } else {
+      state.treatmentBusy = false;
+      showToast('儲存失敗，請稍後再試一次');
+      render();
+    }
+  }catch(err){
+    console.error(err);
+    state.treatmentBusy = false;
+    showToast('無法連線，請稍後再試一次');
+    render();
+  }
+}
+
+/* ---------------- 匯出 Excel ---------------- */
+function exportRecordsToExcel(){
+  const rangeRecords = filterByDateRange(state.records, state.dashFrom, state.dashTo);
+  const q = (state.dashSearch||'').trim();
+  let list = [...rangeRecords].sort((a,b)=> a.ts - b.ts);
+  if(q) list = list.filter(r => r.name.includes(q) || r.id.includes(q) || r.class.includes(q));
+
+  if(list.length === 0){
+    showToast('目前區間內沒有資料可以匯出');
+    return;
+  }
+
+  const rows = list.map(r => ({
+    '時間': formatTime(r.ts),
+    '班級': r.class,
+    '學號': r.id,
+    '姓名': r.name,
+    '性別': r.gender,
+    '原因': r.reason,
+    '詳細原因': r.detail || '',
+    '護理處置': r.treatment || '',
+    '狀態': r.status === 'done' ? '已處理' : '未處理',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:10},{wch:14},{wch:40},{wch:8}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '報到紀錄');
+  const fname = `報到紀錄_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  showToast('已匯出 Excel');
 }
 
 async function handleRosterFile(e){
@@ -655,9 +1017,9 @@ async function handleRosterFile(e){
       return;
     }
     showToast('匯入中，請稍候…');
-    const res = await apiPost('importRoster', { rows: parsed });
+    const res = await apiPost('importRoster', { token: state.sessionToken, rows: parsed });
     if(res && res.ok){
-      await loadData();
+      await loadRoster();
       render();
       showToast(`已匯入 ${parsed.length} 筆學生資料`);
     } else {
