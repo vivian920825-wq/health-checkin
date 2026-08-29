@@ -727,14 +727,9 @@ function bindEvents(){
   document.querySelectorAll('[data-act]').forEach(el=>{
     el.addEventListener('click', onAct);
   });
-  const searchBox = document.getElementById('search-box');
-  if(searchBox){
-    searchBox.addEventListener('input', e=>{ state.search = e.target.value; render(); preserveFocus('search-box'); });
-  }
-  const dashSearch = document.getElementById('dash-search');
-  if(dashSearch){
-    dashSearch.addEventListener('input', e=>{ state.dashSearch = e.target.value; render(); preserveFocus('dash-search'); });
-  }
+  bindLiveSearch('search-box', v=>{ state.search = v; render(); preserveFocus('search-box'); });
+  bindLiveSearch('dash-search', v=>{ state.dashSearch = v; render(); preserveFocus('dash-search'); });
+  bindLiveSearch('case-search', v=>{ state.caseSearch = v; render(); preserveFocus('case-search'); });
   const dashFrom = document.getElementById('dash-from');
   if(dashFrom){
     dashFrom.addEventListener('change', e=>{ state.dashFrom = e.target.value; render(); });
@@ -746,10 +741,6 @@ function bindEvents(){
   const treatmentOther = document.getElementById('treatment-other');
   if(treatmentOther){
     treatmentOther.addEventListener('input', e=>{ state.treatmentOther = e.target.value; });
-  }
-  const caseSearch = document.getElementById('case-search');
-  if(caseSearch){
-    caseSearch.addEventListener('input', e=>{ state.caseSearch = e.target.value; render(); preserveFocus('case-search'); });
   }
   document.querySelectorAll('.hc-value').forEach(el=>{
     el.addEventListener('input', e=>{
@@ -769,9 +760,35 @@ function bindEvents(){
   manageAutoRefresh();
 }
 
+// 中文（注音／拼音）等輸入法在選字前會經過「組字中」的狀態，
+// 如果每個按鍵都立刻整頁重繪，選字過程會被打斷，導致打不出字、只能貼上。
+// 這裡在組字期間（compositionstart ~ compositionend）先不重繪，
+// 等使用者確定選字完成才真正更新畫面。
+function bindLiveSearch(id, onChange){
+  const el = document.getElementById(id);
+  if(!el) return;
+  let composing = false;
+  el.addEventListener('compositionstart', ()=>{ composing = true; });
+  el.addEventListener('compositionend', (e)=>{
+    composing = false;
+    onChange(e.target.value);
+  });
+  el.addEventListener('input', (e)=>{
+    if(composing) return;
+    onChange(e.target.value);
+  });
+}
+
 function preserveFocus(id){
   const el = document.getElementById(id);
-  if(el){ el.focus(); const v = el.value; el.value=''; el.value=v; }
+  // 只有在焦點真的跑掉時才需要重新 focus；重複呼叫 focus() 會讓瀏覽器
+  // 每次都嘗試把輸入框捲動到可視範圍內，造成畫面一直跳動／晃動。
+  if(el && document.activeElement !== el){
+    try{ el.focus({preventScroll:true}); }catch(err){ el.focus(); }
+    const v = el.value;
+    el.value = v;
+    el.setSelectionRange(v.length, v.length);
+  }
 }
 
 function manageAutoRefresh(){
