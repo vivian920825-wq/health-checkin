@@ -43,7 +43,7 @@ let state = {
   loggedIn: false,
   sessionToken: null,
   toast: null,
-  student: { grade:null, section:null, id:null, name:null, gender:null, reason:null, detail:null },
+  student: { method:null, grade:null, id:null, name:null, class:null, gender:null, reason:null, detail:null },
   loginErr: '',
   loginBusy: false,
   search: '',
@@ -284,8 +284,7 @@ function headerRight(){
 function screenHtml(){
   switch(state.screen){
     case 'home': return homeScreen();
-    case 'student-1': return studentStep1();
-    case 'student-2': return studentStep2();
+    case 'student-select': return studentSelect();
     case 'student-3': return studentStep3();
     case 'student-4': return studentStep4();
     case 'student-5': return studentStep5();
@@ -321,64 +320,82 @@ function homeScreen(){
   </div>`;
 }
 
-/* ---- STUDENT STEP 1: 班級 ---- */
-function studentStep1(){
-  const {grade, section} = state.student;
+/* ---- STUDENT SELECT: 輸入學號查詢 或 選擇班級瀏覽 ---- */
+function studentSelect(){
+  const s = state.student;
+  const method = s.method;
   return `
   ${stepperBlock(1)}
   <div class="card">
-    <h1 class="title">選擇班級</h1>
-    <p class="subtitle">請先選擇年級，再選擇班別</p>
+    <h1 class="title">選擇學生</h1>
+    <p class="subtitle">可以直接輸入學號查詢，或選擇年級瀏覽名冊</p>
     <div class="choice-grid" style="margin-bottom:18px;">
-      ${CLASSES.map(g=>`<div class="choice-btn ${grade===g?'selected':''}" data-act="pick-grade" data-val="${g}">${g}</div>`).join('')}
+      <div class="choice-btn ${method==='id'?'selected':''}" data-act="pick-method" data-val="id">輸入學號查詢</div>
+      <div class="choice-btn ${method==='class'?'selected':''}" data-act="pick-method" data-val="class">選擇班級瀏覽</div>
     </div>
-    ${grade ? `
-      <p class="subtitle" style="margin-bottom:10px;">班別</p>
-      <div class="choice-grid cols-6">
-        ${SECTIONS.map(s=>`<div class="choice-btn ${section===s?'selected':''}" data-act="pick-section" data-val="${s}">${s}</div>`).join('')}
-      </div>
-    ` : ''}
+    ${method === 'id' ? studentIdSearchBlock() : ''}
+    ${method === 'class' ? studentClassBrowseBlock() : ''}
     <div class="btn-row">
-      <button class="btn btn-primary" data-act="to-step2" ${(grade&&section)?'':'disabled'} style="width:100%;">下一步</button>
+      <button class="btn btn-ghost" data-act="go-home">上一步</button>
+      <button class="btn btn-primary" data-act="to-step3" ${s.id?'':'disabled'}>下一步</button>
     </div>
   </div>`;
 }
 
-/* ---- STUDENT STEP 2: 學號姓名 ---- */
-function studentStep2(){
-  const className = state.student.grade + state.student.section + '班';
-  const list = state.roster.filter(r => r.class === className);
+function studentIdSearchBlock(){
   const q = (state.search||'').trim();
-  const filtered = q ? list.filter(r => r.id.includes(q) || r.name.includes(q)) : list;
+  const matches = q ? state.roster.filter(r => r.id.includes(q) || r.name.includes(q)) : [];
   return `
-  ${stepperBlock(2)}
-  <div class="card">
-    <h1 class="title">選擇學號與姓名</h1>
-    <p class="subtitle">班級：${className}　共 ${list.length} 位學生</p>
-    ${list.length ? `<input class="search-input" placeholder="輸入學號或姓名搜尋" id="search-box" value="${q}">` : ''}
-    ${
-      list.length === 0
-      ? `<div class="empty-note">此班級尚未匯入學生名冊。<br>請聯繫護理人員以 Excel 匯入名冊後再試一次。</div>`
+  <input class="search-input" id="search-box" placeholder="輸入學號或姓名查詢" value="${q}">
+  ${
+    !q
+    ? `<div class="empty-note">請輸入學號或姓名開始查詢</div>`
+    : matches.length === 0
+      ? `<div class="empty-note">找不到符合的學生</div>`
       : `<div class="student-list">
-          ${filtered.map(r=>`
-            <div class="student-row ${state.student.id===r.id?'selected':''}" data-act="pick-student" data-id="${r.id}" data-name="${r.name}">
+          ${matches.slice(0,30).map(r=>`
+            <div class="student-row ${state.student.id===r.id?'selected':''}" data-act="pick-student" data-id="${r.id}" data-name="${r.name}" data-class="${r.class}">
               <span class="sname">${r.name}</span>
-              <span class="sid">${r.id}</span>
-            </div>`).join('') || `<div class="empty-note">找不到符合的學生</div>`}
+              <span class="sid">${r.id}・${r.class}</span>
+            </div>`).join('')}
         </div>`
-    }
-    <div class="btn-row">
-      <button class="btn btn-ghost" data-act="back-step1">上一步</button>
-      <button class="btn btn-primary" data-act="to-step3" ${state.student.id?'':'disabled'}>下一步</button>
-    </div>
-  </div>`;
+  }`;
+}
+
+function studentClassBrowseBlock(){
+  const grade = state.student.grade;
+  const q = (state.search||'').trim();
+  let listBlock = '';
+  if(grade){
+    const list = state.roster.filter(r => r.class.startsWith(grade));
+    const filtered = q ? list.filter(r => r.id.includes(q) || r.name.includes(q)) : list;
+    listBlock = `
+      <p class="subtitle" style="margin:14px 0 10px;">${grade}　共 ${list.length} 位學生</p>
+      ${list.length ? `<input class="search-input" id="search-box" placeholder="輸入學號或姓名搜尋" value="${q}">` : ''}
+      ${
+        list.length === 0
+        ? `<div class="empty-note">此年級尚未匯入學生名冊。<br>請聯繫護理人員以 Excel 匯入名冊後再試一次。</div>`
+        : `<div class="student-list">
+            ${filtered.map(r=>`
+              <div class="student-row ${state.student.id===r.id?'selected':''}" data-act="pick-student" data-id="${r.id}" data-name="${r.name}" data-class="${r.class}">
+                <span class="sname">${r.name}</span>
+                <span class="sid">${r.id}・${r.class}</span>
+              </div>`).join('') || `<div class="empty-note">找不到符合的學生</div>`}
+          </div>`
+      }`;
+  }
+  return `
+  <div class="choice-grid">
+    ${CLASSES.map(g=>`<div class="choice-btn ${grade===g?'selected':''}" data-act="pick-grade" data-val="${g}">${g}</div>`).join('')}
+  </div>
+  ${listBlock}`;
 }
 
 /* ---- STUDENT STEP 3: 性別 ---- */
 function studentStep3(){
   const g = state.student.gender;
   return `
-  ${stepperBlock(3)}
+  ${stepperBlock(2)}
   <div class="card">
     <h1 class="title">選擇性別</h1>
     <p class="subtitle">${state.student.name}（${state.student.id}）</p>
@@ -397,7 +414,7 @@ function studentStep3(){
 function studentStep4(){
   const r = state.student.reason;
   return `
-  ${stepperBlock(4)}
+  ${stepperBlock(3)}
   <div class="card">
     <h1 class="title">傷病原因</h1>
     <p class="subtitle">請選擇本次到健康中心的原因</p>
@@ -424,7 +441,7 @@ function studentStep5(){
   const options = s.reason === '身體不適' ? ILLNESS_REASONS : INJURY_REASONS;
   const d = s.detail;
   return `
-  ${stepperBlock(5)}
+  ${stepperBlock(4)}
   <div class="card">
     <h1 class="title">${s.reason}詳細原因</h1>
     <p class="subtitle">請選擇最符合的項目</p>
@@ -432,7 +449,7 @@ function studentStep5(){
       ${options.map(o=>`<div class="choice-btn ${d===o?'selected':''}" data-act="pick-detail" data-val="${o}">${o}</div>`).join('')}
     </div>
     <div class="summary-box" style="margin-top:22px;">
-      <div class="summary-row"><span class="k">班級</span><span class="v">${s.grade}${s.section}班</span></div>
+      <div class="summary-row"><span class="k">班級</span><span class="v">${s.class}</span></div>
       <div class="summary-row"><span class="k">學號 / 姓名</span><span class="v">${s.id} ${s.name}</span></div>
       <div class="summary-row"><span class="k">性別</span><span class="v">${s.gender}</span></div>
       <div class="summary-row"><span class="k">原因</span><span class="v">${s.reason}${d ? '・'+d : ''}</span></div>
@@ -457,7 +474,7 @@ function studentDone(){
 }
 
 function stepperBlock(step){
-  const labels = ['班級','學號姓名','性別','原因','詳細原因'];
+  const labels = ['學生','性別','原因','詳細原因'];
   return `
   <div class="stepper">
     ${stepperSvg(step, labels.length)}
@@ -807,33 +824,35 @@ async function onAct(e){
   switch(act){
     case 'go-home':
       state.screen = 'home';
-      state.student = { grade:null, section:null, id:null, name:null, gender:null, reason:null, detail:null };
+      state.student = { method:null, grade:null, id:null, name:null, class:null, gender:null, reason:null, detail:null };
       state.search = '';
       render(); break;
 
     case 'start-student':
-      state.screen = 'student-1'; render(); break;
+      state.screen = 'student-select'; render(); break;
+
+    case 'pick-method':
+      state.student.method = el.dataset.val;
+      state.student.grade = null;
+      state.student.id = null; state.student.name = null; state.student.class = null;
+      state.search = '';
+      render(); break;
 
     case 'pick-grade':
       state.student.grade = el.dataset.val;
-      state.student.section = null;
+      state.student.id = null; state.student.name = null; state.student.class = null;
+      state.search = '';
       render(); break;
-    case 'pick-section':
-      state.student.section = el.dataset.val;
-      render(); break;
-    case 'to-step2':
-      state.screen = 'student-2'; state.search=''; render(); break;
-    case 'back-step1':
-      state.screen = 'student-1'; render(); break;
 
     case 'pick-student':
       state.student.id = el.dataset.id;
       state.student.name = el.dataset.name;
+      state.student.class = el.dataset.class;
       render(); break;
     case 'to-step3':
       state.screen = 'student-3'; render(); break;
     case 'back-step2':
-      state.screen = 'student-2'; render(); break;
+      state.screen = 'student-select'; render(); break;
 
     case 'pick-gender':
       state.student.gender = el.dataset.val; render(); break;
@@ -969,7 +988,7 @@ async function submitRecord(){
   const s = state.student;
   const rec = {
     recordId: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    class: s.grade + s.section + '班',
+    class: s.class,
     id: s.id, name: s.name, gender: s.gender, reason: s.reason, detail: s.detail,
     status: 'pending', ts: Date.now()
   };
