@@ -122,6 +122,26 @@ function todayStr(offsetDays){
   return d.toISOString().slice(0,10);
 }
 
+/* ---------------- 名冊快取（讓學生第二次以後開網頁幾乎秒開） ---------------- */
+const ROSTER_CACHE_KEY = 'roster-cache-v1';
+function readRosterCache(){
+  try{
+    const raw = localStorage.getItem(ROSTER_CACHE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    return (parsed && Array.isArray(parsed.roster)) ? parsed.roster : null;
+  }catch(e){
+    return null; // 讀不到快取就當作沒有，不影響正常流程
+  }
+}
+function writeRosterCache(roster){
+  try{
+    localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify({ roster, ts: Date.now() }));
+  }catch(e){
+    // 存不進去（例如無痕模式）就算了，不影響功能
+  }
+}
+
 async function init(){
   state.dashFrom = todayStr(-6);
   state.dashTo = todayStr(0);
@@ -130,24 +150,39 @@ async function init(){
     render();
     return;
   }
-  render(); // 先畫出「讀取資料中…」，避免抓資料期間畫面完全空白
-  await loadRoster();
-  state.loading = false;
-  render();
+
+  const cached = readRosterCache();
+  if(cached){
+    // 先用快取資料立刻畫面，不用等 Apps Script 回應
+    state.roster = cached;
+    state.loading = false;
+    render();
+    // 背景偷偷抓一次最新資料，抓到就悄悄更新；抓不到也不打擾使用者
+    // （反正手上已經有能用的快取資料，不需要為了背景刷新失敗跳錯誤訊息）
+    loadRoster(true).then(()=> render());
+  } else {
+    render(); // 先畫出「讀取資料中…」，避免抓資料期間畫面完全空白
+    await loadRoster();
+    state.loading = false;
+    render();
+  }
 }
 
-async function loadRoster(){
+async function loadRoster(silent){
   try{
     const data = await apiGetWithRetry('getRoster');
     if(data && data.ok){
       state.roster = data.roster || [];
       state.loadError = null;
-    } else {
+      writeRosterCache(state.roster);
+    } else if(!silent){
       state.loadError = '讀取名冊失敗，請確認 Apps Script 是否部署成功';
     }
   }catch(e){
     console.error(e);
-    state.loadError = '無法連線到資料庫，請檢查網路連線或 Apps Script 網址設定';
+    if(!silent){
+      state.loadError = '無法連線到資料庫，請檢查網路連線或 Apps Script 網址設定';
+    }
   }
 }
 
