@@ -12,6 +12,20 @@ async function apiPost(action, payload){
   });
   return res.json();
 }
+// Apps Script 偶爾會有短暫的連線波動，讀取類的請求自動重試一次，
+// 減少單純因為網路小抖動就跳出「無法連線」的情況
+async function apiGetWithRetry(action, params, retries){
+  retries = (retries === undefined) ? 1 : retries;
+  try{
+    return await apiGet(action, params);
+  }catch(e){
+    if(retries > 0){
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      return apiGetWithRetry(action, params, retries - 1);
+    }
+    throw e;
+  }
+}
 function urlConfigured(){
   return APPS_SCRIPT_URL && !APPS_SCRIPT_URL.includes('PASTE_YOUR');
 }
@@ -124,7 +138,7 @@ async function init(){
 
 async function loadRoster(){
   try{
-    const data = await apiGet('getRoster');
+    const data = await apiGetWithRetry('getRoster');
     if(data && data.ok){
       state.roster = data.roster || [];
       state.loadError = null;
@@ -139,7 +153,7 @@ async function loadRoster(){
 
 async function loadRecords(){
   try{
-    const data = await apiGet('getRecords', { token: state.sessionToken });
+    const data = await apiGetWithRetry('getRecords', { token: state.sessionToken });
     if(data && data.ok){
       state.records = data.records || [];
       state.loadError = null;
@@ -159,7 +173,7 @@ async function loadRecords(){
 
 async function loadRosterFull(){
   try{
-    const data = await apiGet('getRosterFull', { token: state.sessionToken });
+    const data = await apiGetWithRetry('getRosterFull', { token: state.sessionToken });
     if(data && data.ok){
       state.rosterFull = data.roster || [];
       state.loadError = null;
@@ -272,7 +286,7 @@ function render(){
 
   app.innerHTML = `
     <div class="app-header">
-      <div class="brand">
+      <div class="brand" data-act="go-brand-home" style="cursor:pointer;">
         <div class="brand-mark">${ICONS.cross.replace('currentColor','#fff')}</div>
         <div>
           <div class="brand-text">健康中心報到系統</div>
@@ -873,6 +887,16 @@ async function onAct(e){
   const el = e.currentTarget;
   const act = el.dataset.act;
   switch(act){
+    case 'go-brand-home':
+      if(state.loggedIn){
+        state.screen = 'nurse-dashboard';
+      } else {
+        state.screen = 'home';
+        state.student = { method:null, grade:null, id:null, name:null, class:null, gender:null, reason:null, detail:null };
+        state.search = '';
+      }
+      render(); break;
+
     case 'retry-load':
       state.loading = true; render();
       if(state.screen === 'nurse-case-management' || state.screen === 'nurse-health-check'){
