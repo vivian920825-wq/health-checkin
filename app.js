@@ -116,6 +116,7 @@ async function init(){
     render();
     return;
   }
+  render(); // 先畫出「讀取資料中…」，避免抓資料期間畫面完全空白
   await loadRoster();
   state.loading = false;
   render();
@@ -280,7 +281,7 @@ function render(){
       </div>
       ${headerRight()}
     </div>
-    ${state.loadError ? `<div class="setup-warning">${state.loadError}</div>` : ''}
+    ${state.loadError ? `<div class="setup-warning">${state.loadError}<div style="margin-top:10px;"><button class="btn btn-ghost" data-act="retry-load">重新嘗試</button></div></div>` : ''}
     <div class="screen">${screenHtml()}</div>
     ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
   `;
@@ -872,6 +873,19 @@ async function onAct(e){
   const el = e.currentTarget;
   const act = el.dataset.act;
   switch(act){
+    case 'retry-load':
+      state.loading = true; render();
+      if(state.screen === 'nurse-case-management' || state.screen === 'nurse-health-check'){
+        await loadRosterFull();
+      } else if(state.screen === 'nurse-dashboard' || state.screen === 'nurse-record-treatment'){
+        await loadRecords();
+      } else {
+        await loadRoster();
+      }
+      state.loading = false;
+      render();
+      break;
+
     case 'go-home':
       state.screen = 'home';
       state.student = { method:null, grade:null, id:null, name:null, class:null, gender:null, reason:null, detail:null };
