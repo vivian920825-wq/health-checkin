@@ -16,6 +16,28 @@ function urlConfigured(){
   return APPS_SCRIPT_URL && !APPS_SCRIPT_URL.includes('PASTE_YOUR');
 }
 
+/* ---------------- 按需載入 Excel 相關函式庫（避免每個人一打開網站就先下載這兩包東西） ---------------- */
+const scriptLoadPromises = {};
+function loadScript(url){
+  if(scriptLoadPromises[url]) return scriptLoadPromises[url];
+  scriptLoadPromises[url] = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve();
+    s.onerror = () => { delete scriptLoadPromises[url]; reject(new Error('無法載入：' + url)); };
+    document.head.appendChild(s);
+  });
+  return scriptLoadPromises[url];
+}
+function ensureXLSX(){
+  if(typeof XLSX !== 'undefined') return Promise.resolve();
+  return loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+}
+function ensureExcelJS(){
+  if(typeof ExcelJS !== 'undefined') return Promise.resolve();
+  return loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+}
+
 /* ---------------- app state ---------------- */
 const CLASSES = ['京劇學系','民俗技藝學系','戲曲音樂學系','歌仔戲學系','劇場藝術學系','客家戲學系','劇場藝術科'];
 const SECTIONS = ['甲','乙','丙','丁','戊','己']; // 目前未使用，保留供未來擴充
@@ -66,6 +88,9 @@ let state = {
   healthCheckNote: '',
   healthCheckBusy: false,
   healthCheckLoading: false,
+  rosterImportBusy: false,
+  rosterExportBusy: false,
+  recordsExportBusy: false,
 };
 
 let refreshTimer = null;
@@ -603,10 +628,10 @@ function nurseCaseManagement(){
     <h1 class="title">學生名冊管理</h1>
     <p class="subtitle" style="margin-bottom:14px;">目前名冊共 ${state.rosterFull.length} 筆。匯入 Excel 需包含欄位：<b>學號</b>、<b>姓名</b>、<b>班級</b>（例如：京劇學系），可選填 <b>病史</b>。</p>
     <div class="dash-toolbar">
-      <button class="btn btn-primary import-btn">${ICONS.upload} 匯入 Excel 名冊
-        <input type="file" id="roster-file" accept=".xlsx,.xls,.csv">
+      <button class="btn btn-primary import-btn" ${state.rosterImportBusy?'disabled':''}>${state.rosterImportBusy ? '匯入中…' : `${ICONS.upload} 匯入 Excel 名冊`}
+        <input type="file" id="roster-file" accept=".xlsx,.xls,.csv" ${state.rosterImportBusy?'disabled':''}>
       </button>
-      ${state.rosterFull.length ? `<button class="btn btn-ghost" data-act="clear-roster">清空名冊</button>` : ''}
+      ${state.rosterFull.length ? `<button class="btn btn-ghost" data-act="clear-roster" ${state.rosterImportBusy?'disabled':''}>清空名冊</button>` : ''}
     </div>
   </div>
 
@@ -615,7 +640,7 @@ function nurseCaseManagement(){
     <p class="subtitle" style="margin-bottom:14px;">可用姓名、學號、班級，或直接搜病史內容（例如「氣喘」）找出相關學生。</p>
     <div class="dash-toolbar">
       <input class="search-input" id="case-search" placeholder="搜尋姓名、學號、班級或病史" value="${q}">
-      <button class="pill-btn" data-act="export-roster-excel">${ICONS.download} 匯出名單 Excel${q ? '（搜尋結果）' : ''}</button>
+      <button class="pill-btn" data-act="export-roster-excel" ${state.rosterExportBusy?'disabled':''}>${state.rosterExportBusy ? '匯出中…' : `${ICONS.download} 匯出名單 Excel${q ? '（搜尋結果）' : ''}`}</button>
     </div>
     ${
       list.length === 0
@@ -721,7 +746,7 @@ function nurseDashboard(){
     <h1 class="title" style="font-size:18px;">報到紀錄（區間內）</h1>
     <div class="dash-toolbar">
       <input class="search-input" id="dash-search" placeholder="搜尋姓名、學號或班級" value="${q}">
-      <button class="pill-btn" data-act="export-excel">${ICONS.download} 匯出 Excel</button>
+      <button class="pill-btn" data-act="export-excel" ${state.recordsExportBusy?'disabled':''}>${state.recordsExportBusy ? '匯出中…' : `${ICONS.download} 匯出 Excel`}</button>
     </div>
     ${
       list.length === 0
@@ -1006,7 +1031,7 @@ async function onAct(e){
       await saveTreatment(); break;
 
     case 'export-excel':
-      exportRecordsToExcel(); break;
+      await exportRecordsToExcel(); break;
 
     case 'clear-roster':
       if(confirm('確定要清空整份學生名冊嗎？此動作無法復原。')){
@@ -1210,8 +1235,13 @@ async function exportRosterToExcel(){
     showToast('目前沒有資料可以匯出');
     return;
   }
-  if(typeof ExcelJS === 'undefined'){
-    showToast('匯出功能載入失敗，請重新整理頁面後再試');
+  state.rosterExportBusy = true; render();
+  try{
+    await ensureExcelJS();
+  }catch(err){
+    console.error(err);
+    showToast('匯出功能載入失敗，請檢查網路連線後再試一次');
+    state.rosterExportBusy = false; render();
     return;
   }
 
@@ -1275,11 +1305,13 @@ async function exportRosterToExcel(){
   }catch(err){
     console.error(err);
     showToast('匯出失敗，請稍後再試一次');
+  }finally{
+    state.rosterExportBusy = false; render();
   }
 }
 
 /* ---------------- 匯出 Excel ---------------- */
-function exportRecordsToExcel(){
+async function exportRecordsToExcel(){
   const rangeRecords = filterByDateRange(state.records, state.dashFrom, state.dashTo);
   const q = (state.dashSearch||'').trim();
   let list = [...rangeRecords].sort((a,b)=> a.ts - b.ts);
@@ -1290,43 +1322,55 @@ function exportRecordsToExcel(){
     return;
   }
 
-  const rows = list.map(r => {
-    const parsed = parseTreatmentString(r.treatment);
-    const row = {
-      '時間': formatTime(r.ts),
-      '班級': r.class,
-      '學號': r.id,
-      '姓名': r.name,
-      '性別': r.gender,
-      '病史': r.history || '',
-      '原因': r.reason,
-      '狀態': r.status === 'done' ? '已處理' : '未處理',
-    };
-    REASON_DETAIL_OPTIONS.forEach(opt => {
-      row[opt] = (r.detail === opt) ? 1 : '';
-    });
-    TREATMENT_OPTIONS.forEach(opt => {
-      row[opt] = parsed.options.includes(opt) ? 1 : '';
-    });
-    row['其它內容'] = parsed.other || '';
-    return row;
-  });
+  state.recordsExportBusy = true; render();
+  try{
+    await ensureXLSX();
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const baseWidths = [14,10,10,10,8,20,10,8];
-  const colWidths = [...baseWidths, ...new Array(REASON_DETAIL_OPTIONS.length).fill(6), ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
-  ws['!cols'] = colWidths.map(w=>({wch:w}));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '報到紀錄');
-  const fname = `報到紀錄_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.xlsx`;
-  XLSX.writeFile(wb, fname);
-  showToast('已匯出 Excel');
+    const rows = list.map(r => {
+      const parsed = parseTreatmentString(r.treatment);
+      const row = {
+        '時間': formatTime(r.ts),
+        '班級': r.class,
+        '學號': r.id,
+        '姓名': r.name,
+        '性別': r.gender,
+        '病史': r.history || '',
+        '原因': r.reason,
+        '狀態': r.status === 'done' ? '已處理' : '未處理',
+      };
+      REASON_DETAIL_OPTIONS.forEach(opt => {
+        row[opt] = (r.detail === opt) ? 1 : '';
+      });
+      TREATMENT_OPTIONS.forEach(opt => {
+        row[opt] = parsed.options.includes(opt) ? 1 : '';
+      });
+      row['其它內容'] = parsed.other || '';
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const baseWidths = [14,10,10,10,8,20,10,8];
+    const colWidths = [...baseWidths, ...new Array(REASON_DETAIL_OPTIONS.length).fill(6), ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
+    ws['!cols'] = colWidths.map(w=>({wch:w}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '報到紀錄');
+    const fname = `報到紀錄_${state.dashFrom||'全部'}_${state.dashTo||'全部'}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    showToast('已匯出 Excel');
+  }catch(err){
+    console.error(err);
+    showToast('匯出失敗，請檢查網路連線後再試一次');
+  }finally{
+    state.recordsExportBusy = false; render();
+  }
 }
 
 async function handleRosterFile(e){
   const file = e.target.files[0];
   if(!file) return;
+  state.rosterImportBusy = true; render();
   try{
+    await ensureXLSX();
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data, {type:'array'});
     const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -1349,15 +1393,15 @@ async function handleRosterFile(e){
     if(res && res.ok){
       await loadRoster();
       await loadRosterFull();
-      render();
       showToast(`已匯入 ${parsed.length} 筆學生資料`);
     } else {
       showToast('匯入失敗，請稍後再試一次');
     }
   }catch(err){
     console.error(err);
-    showToast('匯入失敗，請確認檔案格式正確');
+    showToast('匯入失敗，請確認檔案格式正確，或網路連線是否正常');
   }finally{
+    state.rosterImportBusy = false; render();
     e.target.value = '';
   }
 }
