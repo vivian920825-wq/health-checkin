@@ -839,6 +839,20 @@ function formatTime(ts){
   return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 完整的「年/月/日 時:分」文字（匯出時當作備用顯示，也給需要年份的地方用）
+function formatDateTimeFull(ts){
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 把時間戳記轉成 Excel 認得的「日期時間序號」，以使用者所在時區的當地時間為準。
+// 寫成真正的日期時間（而不是文字），Excel 才能排序、篩選、算區間。
+function toExcelSerial(ts){
+  const d = new Date(ts);
+  return (ts - d.getTimezoneOffset()*60000) / 86400000 + 25569;
+}
+
 /* ---------------- events ---------------- */
 function bindEvents(){
   document.querySelectorAll('[data-act]').forEach(el=>{
@@ -1402,7 +1416,7 @@ async function exportRecordsToExcel(){
     const rows = list.map(r => {
       const parsed = parseTreatmentString(r.treatment);
       const row = {
-        '時間': formatTime(r.ts),
+        '時間': formatDateTimeFull(r.ts),
         '班級': r.class,
         '學號': r.id,
         '姓名': r.name,
@@ -1422,7 +1436,12 @@ async function exportRecordsToExcel(){
     });
 
     const ws = XLSX.utils.json_to_sheet(rows);
-    const baseWidths = [14,10,10,10,8,20,10,8];
+    // 第一欄「時間」覆蓋成真正的日期時間儲存格（第 0 列是標題，資料從第 1 列開始）
+    list.forEach((r, i) => {
+      const addr = XLSX.utils.encode_cell({ r: i + 1, c: 0 });
+      ws[addr] = { t: 'n', v: toExcelSerial(r.ts), z: 'yyyy/mm/dd hh:mm' };
+    });
+    const baseWidths = [18,10,10,10,8,20,10,8];
     const colWidths = [...baseWidths, ...new Array(REASON_DETAIL_OPTIONS.length).fill(6), ...new Array(TREATMENT_OPTIONS.length).fill(6), 30];
     ws['!cols'] = colWidths.map(w=>({wch:w}));
     const wb = XLSX.utils.book_new();
